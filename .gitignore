@@ -1,0 +1,15 @@
+# Local personal settings
+config.json
+start.ps1
+
+# Windows
+Thumbs.db
+Desktop.ini
+
+# Editor
+.vscode/
+.idea/
+
+# Temporary files
+*.tmp
+*.log
