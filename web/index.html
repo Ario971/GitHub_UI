@@ -1,0 +1,473 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="git-control-token" content="{{SESSION_TOKEN}}">
+  <title>Branchline · Git Workbench</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="paper-texture" aria-hidden="true"></div>
+
+  <header class="topbar">
+    <a class="brand" href="#workspace" aria-label="Branchline home">
+      <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
+      <span>
+        <strong>Branchline</strong>
+        <small>local Git workbench</small>
+      </span>
+    </a>
+
+    <div class="repo-pulse" aria-live="polite">
+      <span id="healthDot" class="health-dot is-idle"></span>
+      <span id="healthText">Waiting for a repository</span>
+      <span class="pulse-divider" aria-hidden="true"></span>
+      <code id="headerBranch">—</code>
+    </div>
+
+    <div class="top-actions">
+      <button id="themeButton" class="icon-button" type="button" aria-label="Switch color theme" title="Switch color theme">
+        <span aria-hidden="true">◐</span>
+      </button>
+      <button id="refreshButton" class="button button-quiet" type="button" data-operation title="Re-read local files and the last fetched GitHub snapshot. This does not contact GitHub.">
+        <span aria-hidden="true">↻</span> Refresh view
+      </button>
+    </div>
+  </header>
+
+  <main id="workspace" class="workspace" aria-busy="false">
+    <aside class="sidebar" aria-label="Repository setup">
+      <section class="panel setup-panel">
+        <div class="panel-kicker">Start here</div>
+        <h1>Choose a project folder.</h1>
+        <p class="panel-intro">Branchline inspects the folder first. It can open Git projects, initialize normal folders, or clone GitHub into an empty folder.</p>
+
+        <div class="field-group">
+          <label for="repoPathInput">Local repository folder</label>
+          <div class="input-shell">
+            <span aria-hidden="true">⌂</span>
+            <input id="repoPathInput" type="text" autocomplete="off" spellcheck="false" placeholder="C:\Projects\my-repository">
+          </div>
+          <div class="button-row">
+            <button id="useRepositoryButton" class="button button-primary" type="button" data-operation>Inspect folder</button>
+            <button id="initializeButton" class="button button-quiet" type="button" data-operation>Make Git repository</button>
+          </div>
+        </div>
+
+        <div class="connection-card">
+          <div>
+            <span class="connection-label">Local status</span>
+            <strong id="localStatus">Not selected</strong>
+          </div>
+          <span id="localBadge" class="status-badge is-neutral">Idle</span>
+        </div>
+
+        <div id="folderGuidance" class="folder-guidance" role="status">Select a folder to see the safest next step.</div>
+
+        <div id="connectionBridge" class="connection-bridge is-offline" role="status" aria-live="polite">
+          <div class="bridge-visual" aria-hidden="true">
+            <span class="bridge-node bridge-local">⌂</span>
+            <span class="bridge-track">
+              <span class="bridge-link-icon">
+                <svg viewBox="0 0 24 24" focusable="false">
+                  <path d="M9.7 14.3 14.3 9.7M7.4 16.6l-1.2 1.2a3.4 3.4 0 0 1-4.8-4.8l3.1-3.1a3.4 3.4 0 0 1 4.8 0M16.6 7.4l1.2-1.2a3.4 3.4 0 0 1 4.8 4.8l-3.1 3.1a3.4 3.4 0 0 1-4.8 0" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="2"/>
+                </svg>
+              </span>
+            </span>
+            <span class="bridge-node bridge-github">GH</span>
+          </div>
+          <div class="bridge-copy">
+            <strong id="connectionBridgeTitle">Not connected</strong>
+            <small id="connectionBridgeDetail">Choose a Git repository and GitHub origin.</small>
+          </div>
+        </div>
+
+        <div class="field-group">
+          <label for="remoteInput">GitHub repository</label>
+          <div class="input-shell">
+            <span aria-hidden="true">↗</span>
+            <input id="remoteInput" type="url" autocomplete="off" spellcheck="false" placeholder="https://github.com/owner/repository">
+          </div>
+          <button id="cloneRepositoryButton" class="button button-primary button-wide is-hidden" type="button" data-operation>Clone GitHub here</button>
+          <button id="connectRemoteButton" class="button button-ink button-wide" type="button" data-operation>Connect GitHub origin</button>
+          <p class="field-note">Only strict <code>github.com</code> HTTPS or SSH addresses are accepted.</p>
+        </div>
+
+        <div class="remote-summary">
+          <span id="remoteStatus">No origin configured</span>
+          <a id="remoteLink" class="text-link is-hidden" target="_blank" rel="noreferrer noopener">Open on GitHub ↗</a>
+        </div>
+
+        <details class="local-git-tools">
+          <summary>Local Git tools</summary>
+          <p>Detaching Git keeps every project file and moves the local history into a recoverable backup.</p>
+          <button id="detachRepositoryButton" class="button button-quiet danger-text button-wide" type="button" data-operation>Detach Git, keep files</button>
+          <button id="restoreGitButton" class="button button-quiet button-wide is-hidden" type="button" data-operation>Restore Git history</button>
+        </details>
+      </section>
+
+      <section class="panel pocket-panel" aria-labelledby="syncHeading">
+        <div class="panel-heading compact">
+          <div>
+            <div class="panel-kicker">Next safe action</div>
+            <h2 id="syncHeading">Local ↔ GitHub</h2>
+          </div>
+          <span id="syncMood" class="mood-chip">Unlinked</span>
+        </div>
+
+        <p id="syncHelp" class="sync-help">Branchline shows only actions that fit the current repository state.</p>
+        <div id="syncContextPanel" class="sync-context" aria-live="polite">
+          <div>
+            <span id="syncContextLabel" class="sync-context-label">On this computer</span>
+            <p id="syncContextHelp">Local actions appear here.</p>
+          </div>
+          <button id="syncSwitchViewButton" class="button button-quiet button-wide" type="button">Review GitHub →</button>
+        </div>
+        <div class="button-row sync-repair-actions">
+          <button id="repairUpstreamButton" class="button button-quiet button-wide is-hidden" type="button" data-operation>Repair branch tracking</button>
+          <button id="publishNewBranchButton" class="button button-primary button-wide is-hidden" type="button" data-operation>Publish as new GitHub branch</button>
+        </div>
+        <div class="sync-actions">
+          <button id="fetchButton" class="step-button" type="button" data-operation>
+            <span aria-hidden="true">↻</span><strong>Check GitHub</strong><small id="fetchButtonNote">Refresh GitHub snapshot only</small>
+          </button>
+          <button id="pullButton" class="step-button" type="button" data-operation>
+            <span aria-hidden="true">↓</span><strong id="pullButtonLabel">Pull</strong><small id="pullButtonNote">Get incoming commits</small>
+          </button>
+          <button id="pushButton" class="step-button" type="button" data-operation>
+            <span aria-hidden="true">↑</span><strong>Publish</strong><small id="pushButtonNote">Send outgoing commits</small>
+          </button>
+        </div>
+
+        <details class="login-details">
+          <summary>GitHub sign-in tools</summary>
+          <div class="button-row stack-mobile">
+            <button id="githubLoginButton" class="button button-quiet" type="button" data-operation>Open sign-in</button>
+            <button id="resetLoginButton" class="button button-quiet danger-text" type="button" data-operation>Reset saved sign-in</button>
+          </div>
+        </details>
+      </section>
+    </aside>
+
+    <div class="main-column">
+      <section class="hero-panel">
+        <div class="hero-copy">
+          <span class="eyebrow">Your repository, at a glance</span>
+          <h2 id="repoName">No repository open</h2>
+          <p id="repoPathView">Choose a trusted working folder from the left.</p>
+        </div>
+        <div class="hero-metrics" aria-label="Repository status">
+          <div class="metric">
+            <span>Branch</span>
+            <strong id="branchName">—</strong>
+          </div>
+          <div class="metric metric-ahead">
+            <span>To publish</span>
+            <strong id="aheadCount">0</strong>
+          </div>
+          <div class="metric metric-behind">
+            <span>To pull</span>
+            <strong id="behindCount">0</strong>
+          </div>
+          <div class="metric metric-time">
+            <span>Local scan</span>
+            <strong id="lastUpdated">—</strong>
+          </div>
+          <div class="metric metric-time">
+            <span>GitHub fetched</span>
+            <strong id="remoteFetchedAt">Never</strong>
+          </div>
+        </div>
+        <div id="repositoryStateError" class="repository-state-error is-hidden" role="alert"></div>
+        <div id="syncBanner" class="sync-banner is-neutral">
+          <span class="sync-icon" aria-hidden="true">≈</span>
+          <div><strong id="syncTitle">Nothing connected yet</strong><span id="syncDescription">Open a repository to see its local and remote state.</span></div>
+        </div>
+      </section>
+
+      <section class="panel worktree-panel" aria-labelledby="worktreeHeading">
+        <div class="panel-heading">
+          <div>
+            <div class="panel-kicker">Review by direction</div>
+            <h2 id="worktreeHeading">Project changes</h2>
+          </div>
+          <div class="heading-tools">
+            <label class="search-shell" for="fileSearchInput">
+              <span aria-hidden="true">⌕</span>
+              <input id="fileSearchInput" type="search" placeholder="Filter files" autocomplete="off">
+            </label>
+            <span id="fileCount" class="count-chip">0 files</span>
+          </div>
+        </div>
+
+        <div id="repositoryTabs" class="workspace-tabs" role="tablist" aria-label="Local and GitHub views">
+          <button id="localViewTab" class="workspace-tab is-active" type="button" role="tab" aria-selected="true" aria-controls="localFilesView" tabindex="0">
+            <strong>On this computer</strong><small id="localTabNote">Local files and changes</small>
+          </button>
+          <button id="githubViewTab" class="workspace-tab" type="button" role="tab" aria-selected="false" aria-controls="githubFilesView" tabindex="-1">
+            <strong>On GitHub</strong><small id="githubTabNote">Last fetched snapshot</small>
+          </button>
+        </div>
+
+        <div id="localFilesView" class="repository-view" role="tabpanel" aria-labelledby="localViewTab">
+        <div class="local-refresh-bar">
+          <div class="local-refresh-copy">
+            <span>Local working copy</span>
+            <strong id="localRefreshStatus" aria-live="polite">Waiting for a repository</strong>
+          </div>
+          <button id="refreshLocalButton" class="button button-quiet button-compact" type="button" data-operation title="Re-scan files, staging, and local commits now. This does not contact GitHub.">
+            <span aria-hidden="true">↻</span> Refresh local files
+          </button>
+          <button id="openRepositoryFolderButton" class="button button-quiet button-compact" type="button" data-operation>Open folder</button>
+        </div>
+        <div class="file-legend" aria-label="File state legend">
+          <span><i class="dot staged"></i>Staged</span>
+          <span><i class="dot modified"></i>Modified</span>
+          <span><i class="dot mixed"></i>Mixed</span>
+          <span><i class="dot untracked"></i>New</span>
+          <span><i class="dot conflicted"></i>Conflict</span>
+        </div>
+
+        <div id="fileNotice" class="notice is-hidden" role="status"></div>
+        <div id="filesList" class="file-list" aria-live="polite">
+          <div class="empty-state">
+            <span aria-hidden="true">✦</span>
+            <strong>No repository loaded</strong>
+            <p>Your files will appear here after you open a working copy.</p>
+          </div>
+        </div>
+        <div class="file-pagination" aria-label="Local file pages">
+          <button id="localPreviousPageButton" class="button button-quiet button-compact" type="button">Previous</button>
+          <span id="localPageStatus">Page 1</span>
+          <button id="localNextPageButton" class="button button-quiet button-compact" type="button">Next</button>
+        </div>
+        </div>
+
+        <div id="githubFilesView" class="repository-view is-hidden" role="tabpanel" aria-labelledby="githubViewTab">
+          <div id="githubSnapshotNotice" class="snapshot-notice">Connect GitHub to inspect the last fetched snapshot.</div>
+          <div id="githubFilesList" class="file-list" aria-live="polite"></div>
+          <div class="file-pagination" aria-label="GitHub file pages">
+            <button id="githubPreviousPageButton" class="button button-quiet button-compact" type="button">Previous</button>
+            <span id="githubPageStatus">Page 1</span>
+            <button id="githubNextPageButton" class="button button-quiet button-compact" type="button">Next</button>
+          </div>
+        </div>
+      </section>
+
+      <section id="composerPanel" class="panel composer-panel" aria-labelledby="composerHeading">
+        <div class="panel-heading">
+          <div>
+            <div class="panel-kicker">Prepare</div>
+            <h2 id="composerHeading">Shape the next commit</h2>
+          </div>
+          <span id="changeCount" class="count-chip warm">0 changes</span>
+        </div>
+
+        <details id="identityPanel" class="identity-panel">
+          <summary>
+            <span>Commit identity</span>
+            <strong id="identitySummary">Required before committing</strong>
+          </summary>
+          <p id="identityHelp">Set the author name and email recorded in commits. These values are saved only in this repository.</p>
+          <div class="identity-form">
+            <label for="identityNameInput">Author name</label>
+            <input id="identityNameInput" type="text" maxlength="100" autocomplete="name" placeholder="Your name">
+            <label for="identityEmailInput">Author email</label>
+            <input id="identityEmailInput" type="email" maxlength="254" autocomplete="email" placeholder="you@example.com">
+            <button id="saveIdentityButton" class="button button-quiet" type="button" data-operation>Save for this repository</button>
+          </div>
+        </details>
+        <div id="commitPrerequisite" class="commit-prerequisite is-hidden">
+          <span class="prerequisite-step" aria-hidden="true">1</span>
+          <div>
+            <strong>Bring GitHub history here first</strong>
+            <small>Your local files stay in place. Staging is cleared so you can review again.</small>
+          </div>
+          <button id="commitPrerequisiteButton" class="button button-ink" type="button" data-operation>Bring GitHub here</button>
+        </div>
+        <p id="commitGuidance" class="commit-guidance" role="status">Choose a repository to prepare a commit.</p>
+
+        <label class="commit-label" for="commitMessageInput">Commit message</label>
+        <textarea id="commitMessageInput" rows="3" maxlength="5000" placeholder="Explain the change in one clear sentence…"></textarea>
+        <div class="composer-footer">
+          <div class="selected-file">
+            <span>Selected file</span>
+            <code id="selectedFileLabel">None</code>
+          </div>
+          <div class="button-row composer-actions">
+            <button id="stageAllButton" class="button button-quiet" type="button" data-operation>Stage all</button>
+            <button id="commitButton" class="button button-primary" type="button" data-operation>Commit staged</button>
+            <button id="commitPushButton" class="button button-ink" type="button" data-operation>Commit staged &amp; publish</button>
+          </div>
+        </div>
+      </section>
+
+      <div class="split-grid">
+        <section class="panel branch-panel" aria-labelledby="branchHeading">
+          <div class="panel-heading compact">
+            <div>
+              <div class="panel-kicker">Navigate</div>
+              <h2 id="branchHeading">Branches</h2>
+            </div>
+          </div>
+          <div class="current-branch-card">
+            <span>Current branch</span>
+            <strong id="currentBranchLabel">—</strong>
+          </div>
+
+          <div class="branch-workflow">
+            <div class="branch-workflow-heading"><span>01</span><strong>Switch branch</strong></div>
+            <label for="branchSelect">Destination branch</label>
+            <select id="branchSelect"></select>
+            <p id="branchSwitchHelp" class="branch-summary">Choose another local branch.</p>
+            <button id="switchBranchButton" class="button button-primary button-wide" type="button" data-operation>Choose a destination</button>
+          </div>
+
+          <div class="branch-workflow merge-workflow">
+            <div class="branch-workflow-heading"><span>02</span><strong>Merge branches</strong></div>
+            <div class="merge-route" aria-label="Merge source and target">
+              <label>Source branch<select id="mergeSourceSelect"></select></label>
+              <span class="merge-arrow" aria-hidden="true">→</span>
+              <label>Target branch<select id="mergeTargetSelect"></select></label>
+            </div>
+            <p id="mergeGuidance" class="branch-summary">Choose different source and target branches.</p>
+            <button id="mergeBranchButton" class="button button-quiet button-wide" type="button" data-operation>Choose a merge route</button>
+          </div>
+
+          <p id="branchSummary" class="branch-summary">Choose a repository to manage its branches.</p>
+          <label for="newBranchInput">New branch</label>
+          <div class="inline-form">
+            <input id="newBranchInput" type="text" autocomplete="off" spellcheck="false" placeholder="feature/clear-name">
+            <button id="createBranchButton" class="button button-ink" type="button" data-operation>Create</button>
+          </div>
+          <button id="deleteBranchButton" class="text-button danger-text" type="button" data-operation>Delete selected destination branch</button>
+          <div class="branch-workflow remote-branch-workflow">
+            <div class="branch-workflow-heading"><span>03</span><strong>Bring down a GitHub branch</strong></div>
+            <label for="remoteBranchSelect">GitHub-only branch</label>
+            <select id="remoteBranchSelect"></select>
+            <button id="checkoutRemoteBranchButton" class="button button-quiet button-wide" type="button" data-operation>Create local branch &amp; switch</button>
+          </div>
+          <a id="pullRequestLink" class="button button-quiet button-wide is-hidden" target="_blank" rel="noreferrer noopener">Open pull request on GitHub ↗</a>
+        </section>
+
+        <section class="panel history-panel" aria-labelledby="historyHeading">
+          <div class="panel-heading compact">
+            <div>
+              <div class="panel-kicker">Remember</div>
+              <h2 id="historyHeading">History</h2>
+            </div>
+            <label class="search-shell small" for="commitSearchInput">
+              <span aria-hidden="true">⌕</span>
+              <input id="commitSearchInput" type="search" placeholder="Search" autocomplete="off">
+            </label>
+          </div>
+          <label class="sr-only" for="commitSelect">Selected commit</label>
+          <select id="commitSelect"></select>
+          <div id="commitsList" class="commit-list"></div>
+          <div class="button-row history-actions">
+            <button id="showCommitButton" class="button button-quiet" type="button" data-operation>Inspect</button>
+            <button id="restoreFromCommitButton" class="button button-quiet" type="button" data-operation>Restore selected file</button>
+            <button id="revertCommitButton" class="button button-quiet danger-text" type="button" data-operation>Revert</button>
+          </div>
+          <details class="danger-zone">
+            <summary>Recovery tools</summary>
+            <p id="operationNotice" class="operation-notice is-hidden" role="status"></p>
+            <button id="abortOperationButton" class="button button-quiet danger-text is-hidden" type="button" data-operation>Abort interrupted operation</button>
+            <p>A hard reset requires a clean working tree and creates a safety reference before moving the branch.</p>
+            <button id="resetCommitButton" class="button button-danger" type="button" data-operation>Reset to selected commit</button>
+          </details>
+        </section>
+      </div>
+    </div>
+
+    <aside class="activity-column" aria-label="Activity log">
+      <section class="panel activity-panel">
+        <div class="panel-heading compact">
+          <div>
+            <div class="panel-kicker">Activity</div>
+            <h2>Command journal</h2>
+          </div>
+          <button id="clearActivityButton" class="text-button" type="button">Clear</button>
+        </div>
+        <p class="activity-intro">Every action leaves a readable note here. Nothing is hidden behind a spinner.</p>
+        <div id="activityList" class="activity-list" aria-live="polite">
+          <div id="activityEmpty" class="activity-empty">
+            <span aria-hidden="true">☕</span>
+            <strong>Quiet for now</strong>
+            <p>Your next Git action will appear here.</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel output-panel">
+        <div class="output-heading">
+          <span>Selected output</span>
+          <div class="button-row output-actions">
+            <button id="toggleOutputButton" class="text-button" type="button" aria-expanded="false">Expand</button>
+            <button id="copyOutputButton" class="text-button" type="button">Copy</button>
+          </div>
+        </div>
+        <div id="outputDetail" class="output-detail" tabindex="0" role="button" aria-label="Selected command output. Click to expand or collapse.">
+          <p class="output-empty">Choose an activity entry to inspect its output.</p>
+        </div>
+        <small class="output-hint">Click the output to expand it; click again or press Esc to return.</small>
+      </section>
+
+      <section class="trust-note">
+        <span aria-hidden="true">⌾</span>
+        <div><strong>Local by design</strong><p>Bound to 127.0.0.1, protected by a session token, and limited to the repository you choose.</p></div>
+      </section>
+    </aside>
+  </main>
+
+  <div id="busyCurtain" class="busy-curtain is-hidden" role="status" aria-live="assertive">
+    <div class="busy-card"><span class="busy-spinner" aria-hidden="true"></span><strong id="busyText">Working…</strong><small>Git is finishing one operation at a time.</small></div>
+  </div>
+  <dialog id="syncGuideDialog" class="sync-guide-dialog" aria-labelledby="syncGuideTitle" aria-describedby="syncGuideDescription">
+    <form method="dialog" class="sync-guide-card">
+      <div class="sync-guide-heading">
+        <div>
+          <span class="panel-kicker">Your safe route</span>
+          <h2 id="syncGuideTitle">Finish synchronization</h2>
+        </div>
+        <button class="icon-button sync-guide-close" type="submit" value="close" aria-label="Close guide">×</button>
+      </div>
+      <p id="syncGuideDescription" class="sync-guide-description">Branchline will explain what is waiting before it runs Git.</p>
+      <div class="sync-guide-metrics" aria-label="Synchronization counts">
+        <span><strong id="syncGuideAhead">0</strong> local</span>
+        <span><strong id="syncGuideBehind">0</strong> GitHub</span>
+        <span><strong id="syncGuideChanges">0</strong> uncommitted</span>
+      </div>
+      <ol id="syncGuideSteps" class="sync-guide-steps"></ol>
+      <div class="sync-guide-actions">
+        <button id="syncGuidePrimaryButton" class="button button-primary" type="button">Go to next step</button>
+        <button class="button button-quiet" type="submit" value="close">Not now</button>
+      </div>
+      <small class="sync-guide-safety">Branchline never force-pushes or discards files to complete this guide.</small>
+    </form>
+  </dialog>
+  <dialog id="filePreviewDialog" class="file-preview-dialog" aria-labelledby="filePreviewTitle" aria-describedby="filePreviewMeta">
+    <div class="file-preview-card">
+      <div class="file-preview-heading">
+        <div><span id="filePreviewSide" class="panel-kicker">Local file</span><h2 id="filePreviewTitle">File preview</h2></div>
+        <button id="closeFilePreviewButton" class="icon-button" type="button" aria-label="Close file preview">×</button>
+      </div>
+      <p id="filePreviewMeta" class="file-preview-meta"></p>
+      <div id="filePreviewTabs" class="file-preview-tabs" role="tablist" aria-label="File content and differences">
+        <button id="previewContentTab" class="button button-quiet is-active" type="button" role="tab" aria-selected="true" aria-controls="filePreviewContent" tabindex="0">Content</button>
+        <button id="previewDiffTab" class="button button-quiet" type="button" role="tab" aria-selected="false" aria-controls="filePreviewContent" tabindex="-1">Differences</button>
+      </div>
+      <pre id="filePreviewContent" role="tabpanel" tabindex="0"></pre>
+    </div>
+  </dialog>
+  <div id="liveStatus" class="sr-only" aria-live="polite" aria-atomic="true"></div>
+  <div id="toastRegion" class="toast-region" aria-live="polite" aria-atomic="true"></div>
+  <script src="/branchline-api.js" defer></script>
+  <script src="/branchline-state.js" defer></script>
+  <script src="/branchline-render.js" defer></script>
+  <script src="/branchline-actions.js" defer></script>
+  <script src="/branchline-a11y.js" defer></script>
+  <script src="/app.js" defer></script>
+</body>
+</html>
