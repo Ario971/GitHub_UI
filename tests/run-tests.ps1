@@ -159,6 +159,8 @@ try {
     $appText = Get-Content -Raw -LiteralPath (Join-Path $webRoot "app.js") -Encoding UTF8
     $stylesText = Get-Content -Raw -LiteralPath (Join-Path $webRoot "styles.css") -Encoding UTF8
     $moduleText = Get-Content -Raw -LiteralPath $modulePath -Encoding UTF8
+    $processText = Get-Content -Raw -LiteralPath (Join-Path $projectRoot "src\private\GitProcess.ps1") -Encoding UTF8
+    $queryText = Get-Content -Raw -LiteralPath (Join-Path $projectRoot "src\private\RepositoryQueries.ps1") -Encoding UTF8
     Assert-True ($indexText.Contains('id="localViewTab"') -and $indexText.Contains('id="githubViewTab"')) "separates local work from the fetched GitHub snapshot"
     Assert-True ($indexText.Contains('id="cloneRepositoryButton"') -and $indexText.Contains('id="detachRepositoryButton"')) "offers contextual normal-folder and Git-folder actions"
     Assert-True ($indexText.Contains('id="toggleOutputButton"') -and $appText.Contains("setOutputExpanded")) "lets selected output expand and collapse"
@@ -183,6 +185,10 @@ try {
     Assert-True ($indexText.Contains('id="repairUpstreamButton"') -and $indexText.Contains('id="checkoutRemoteBranchButton"')) "offers tracking repair and remote-only branch checkout"
     Assert-True ($indexText.Contains('<span>Local scan</span>') -and $indexText.Contains('id="lastUpdated"') -and $indexText.Contains('id="remoteFetchedAt"')) "reports local scan and GitHub fetch times separately"
     Assert-True (-not $moduleText.Contains('Write-Warning "A local request failed."')) "does not alarm users for harmless browser connection cancellations"
+    Assert-True (-not $appText.Contains("Legacy") -and -not $moduleText.Contains("Legacy") -and -not $queryText.Contains("Legacy")) "removes obsolete duplicate frontend and backend implementations"
+    Assert-True ($appText.Contains("function actionResultMessage") -and $appText.Contains('result.phase === "merge"') -and $appText.Contains("result.commitCreated")) "explains each partial result according to the phase that actually failed"
+    Assert-True ($processText.Contains("Stop-BranchlineProcessTree") -and $processText.Contains("completeTreeConfirmed") -and $processText.Contains("WaitForExit(2500)")) "bounds timeout cleanup and reports whether the complete Git process tree stopped"
+    Assert-True ($queryText.Contains("-CaptureBytes") -and $queryText.Contains("UTF8Encoding(`$false, `$true)")) "classifies fetched blobs from raw bytes before rendering UTF-8 text"
 
     Write-Host "`nRemote validation"
     $httpsRemote = ConvertTo-GitHubRemoteValue "https://github.com/Ario971/GitHub_UI"
@@ -520,8 +526,33 @@ try {
     $preflight = Invoke-TestRequest "$baseUrl/api/action" -Method "OPTIONS" -Headers @{ "Origin" = "https://attacker.example" }
     Assert-Equal 405 $preflight.Status "rejects cross-origin preflight requests"
     Assert-True (-not $preflight.Headers.ContainsKey("Access-Control-Allow-Origin")) "omits CORS headers from live responses"
-    $stopOutput = (& (Join-Path $projectRoot "stop.ps1") -Port $port 2>&1 6>&1 | Out-String)
-    Assert-True ($stopOutput.Contains("stopped safely")) "stops a verified Branchline process through the one-click stop implementation"
+
+    $runtimeMarker = Join-Path $projectRoot ".runtime\active.json"
+    $coordinationClient = New-Object System.Net.Sockets.TcpClient
+    try {
+        $coordinationClient.Connect("127.0.0.1", $port)
+        $partialCoordinationRequest = [System.Text.Encoding]::ASCII.GetBytes("GET /api/about HTTP/1.1`r`nHost: 127.0.0.1`r`n")
+        $coordinationClient.GetStream().Write($partialCoordinationRequest, 0, $partialCoordinationRequest.Length)
+        Start-Sleep -Milliseconds 250
+        Remove-Item -LiteralPath $runtimeMarker -Force
+        $busyDuplicateOutput = (& { Start-GitControlPanel -RepoPath $repository -Port $port -WebRoot $webRoot -NoBrowser -AllowLocalTestRemote } 6>&1 | Out-String)
+        Assert-True ($busyDuplicateOutput.Contains("No duplicate instance was started")) "uses the per-install mutex when a busy server cannot recreate its deleted marker yet"
+    }
+    finally { $coordinationClient.Dispose() }
+    $markerDeadline = (Get-Date).AddSeconds(10)
+    while (-not (Test-Path -LiteralPath $runtimeMarker -PathType Leaf) -and (Get-Date) -lt $markerDeadline) { Start-Sleep -Milliseconds 100 }
+    Assert-True (Test-Path -LiteralPath $runtimeMarker -PathType Leaf) "recreates the deleted runtime marker after the busy request finishes"
+
+    $busyClient = New-Object System.Net.Sockets.TcpClient
+    try {
+        $busyClient.Connect("127.0.0.1", $port)
+        $partialRequest = [System.Text.Encoding]::ASCII.GetBytes("GET /api/about HTTP/1.1`r`nHost: 127.0.0.1`r`n")
+        $busyClient.GetStream().Write($partialRequest, 0, $partialRequest.Length)
+        Start-Sleep -Milliseconds 250
+        $stopOutput = (& (Join-Path $projectRoot "stop.ps1") -Port $port 2>&1 6>&1 | Out-String)
+    }
+    finally { $busyClient.Dispose() }
+    Assert-True ($stopOutput.Contains("stopped safely")) "stops a verified Branchline process even while the single-threaded server is busy"
     [void]$script:ServerProcess.WaitForExit(5000)
     Assert-True $script:ServerProcess.HasExited "releases the listening port after the stop command"
 

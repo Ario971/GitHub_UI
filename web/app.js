@@ -601,7 +601,7 @@ function renderFiles() {
       button.type = "button";
       button.className = `file-action${dangerous ? " is-danger" : ""}`;
       button.textContent = label;
-      button.disabled = state.busy;
+      button.disabled = state.busy || summary.stateOk === false;
       button.addEventListener("click", async () => {
         setSelectedFile(file.path);
         if (action === "restoreFile") {
@@ -729,7 +729,7 @@ function renderSyncContext() {
   const summary = state.summary || {};
   const tracking = summary.tracking || {};
   const relationship = String(tracking.relationship || "no-remote");
-  const changed = asArray(summary.changedFiles).length;
+  const changed = Number(summary.changedCount ?? asArray(summary.changedFiles).length);
   const ahead = Number(tracking.ahead || 0);
   const behind = Number(tracking.behind || 0);
   const branch = summary.branch || "current branch";
@@ -1137,7 +1137,7 @@ function updateBranchControls() {
   const destination = elements.branchSelect.value || "";
   const mergeSource = elements.mergeSourceSelect.value || "";
   const mergeTarget = elements.mergeTargetSelect.value || "";
-  const changed = asArray(summary.changedFiles).length;
+  const changed = Number(summary.changedCount ?? asArray(summary.changedFiles).length);
   const defaultBranch = String(summary.defaultBranch || "main");
   const onSharedBase = Boolean(current && current === defaultBranch);
   const branchPublished = Boolean(summary.tracking?.matchingRemoteExists);
@@ -1233,6 +1233,10 @@ function renderSummary() {
   const folder = summary?.folder || {};
   const tracking = summary?.tracking || {};
   const changedFiles = asArray(summary?.changedFiles);
+  const changedTotal = Number(summary?.changedCount ?? changedFiles.length);
+  const stagedTotal = Number(summary?.stagedCount ?? changedFiles.filter((file) => ["staged", "mixed"].includes(file.state)).length);
+  const unstagedTotal = Number(summary?.unstagedCount ?? changedFiles.filter((file) => ["modified", "mixed", "untracked", "deleted", "conflicted"].includes(file.state)).length);
+  const conflictTotal = Number(summary?.conflictCount ?? changedFiles.filter((file) => file.state === "conflicted").length);
   const relationship = String(tracking.relationship || (configured ? "no-remote" : "no-repository"));
   const backups = asArray(folder.backups);
 
@@ -1331,8 +1335,8 @@ function renderSummary() {
     "unpublished": ["Current branch is local only", `Publish ${summary?.branch || "this branch"} to create its matching GitHub branch.`, "Ready to publish", "good"],
     "in-sync": ["Local and GitHub agree", "No committed work is waiting in either direction.", "In sync", "good"],
     "ahead": [`${ahead} outgoing commit${ahead === 1 ? "" : "s"}`, "Review local commits, then publish them to GitHub.", "Publish next", "good"],
-    "behind": [`${behind} incoming commit${behind === 1 ? "" : "s"}`, changedFiles.length > 0 ? "Commit or restore every local change, then open the GitHub tab and Pull." : "Open the GitHub tab to review the incoming work, then Pull safely.", "Pull next", "warn"],
-    "diverged": ["Local and GitHub both have new commits", changedFiles.length > 0 ? "Commit or restore every remaining local change. Then use Integrate GitHub, followed by Publish." : "Open the GitHub tab, integrate both histories with a normal merge, then Publish. Nothing is overwritten.", "Integrate next", "warn"],
+    "behind": [`${behind} incoming commit${behind === 1 ? "" : "s"}`, changedTotal > 0 ? "Commit or restore every local change, then open the GitHub tab and Pull." : "Open the GitHub tab to review the incoming work, then Pull safely.", "Pull next", "warn"],
+    "diverged": ["Local and GitHub both have new commits", changedTotal > 0 ? "Commit or restore every remaining local change. Then use Integrate GitHub, followed by Publish." : "Open the GitHub tab, integrate both histories with a normal merge, then Publish. Nothing is overwritten.", "Integrate next", "warn"],
     "unrelated": ["These are different projects", "The local and GitHub histories are unrelated. Clone GitHub into another empty folder or connect this local project to a different empty repository.", "Sync blocked", "warn"],
     "upstream-mismatch": ["Upstream mismatch", `This branch tracks ${tracking.upstream || "another branch"}, not origin/${summary?.branch || "current"}.`, "Review upstream", "warn"],
     "remote-branch-missing": ["GitHub branch is missing", "Branchline could not prove a safe relationship with the available GitHub branches.", "Review connection", "warn"],
@@ -1362,19 +1366,17 @@ function renderSummary() {
   elements.pullButtonNote.textContent = relationship === "local-empty"
     ? `Keep local files - adopt ${tracking.remoteDefaultBranch || "GitHub history"}`
     : relationship === "diverged"
-      ? changedFiles.length > 0 ? `Commit or restore ${changedFiles.length} local change${changedFiles.length === 1 ? "" : "s"} first` : `Merge ${behind} incoming with ${ahead} local`
+      ? changedTotal > 0 ? `Commit or restore ${changedTotal} local change${changedTotal === 1 ? "" : "s"} first` : `Merge ${behind} incoming with ${ahead} local`
       : behind > 0
-        ? changedFiles.length > 0 ? `Commit or restore ${changedFiles.length} local change${changedFiles.length === 1 ? "" : "s"} first` : `Pull ${behind} into ${currentBranchLabel}`
+        ? changedTotal > 0 ? `Commit or restore ${changedTotal} local change${changedTotal === 1 ? "" : "s"} first` : `Pull ${behind} into ${currentBranchLabel}`
         : `No incoming commits on ${currentBranchLabel}`;
-  elements.localTabNote.textContent = `${changedFiles.length} uncommitted change${changedFiles.length === 1 ? "" : "s"}`;
+  elements.localTabNote.textContent = `${changedTotal} uncommitted change${changedTotal === 1 ? "" : "s"}`;
   elements.githubTabNote.textContent = summary?.remoteSnapshot?.available ? `${behind} incoming · fetched ${summary.remoteFetchedAt ? String(summary.remoteFetchedAt).split(" ").pop() : "earlier"}` : "No fetched snapshot";
-  elements.changeCount.textContent = `${changedFiles.length} change${changedFiles.length === 1 ? "" : "s"}`;
+  elements.changeCount.textContent = `${changedTotal} change${changedTotal === 1 ? "" : "s"}`;
 
-  const stagedFiles = changedFiles.filter((file) => ["staged", "mixed"].includes(file.state));
-  const unstagedFiles = changedFiles.filter((file) => ["modified", "mixed", "untracked", "deleted", "conflicted"].includes(file.state));
   const scanTime = configured ? String(summary.localScannedAt || "").split(" ").pop() : "";
   elements.localRefreshStatus.textContent = configured
-    ? `${changedFiles.length} change${changedFiles.length === 1 ? "" : "s"} · ${stagedFiles.length} ready to commit · scanned ${scanTime || "now"}`
+    ? `${changedTotal} change${changedTotal === 1 ? "" : "s"} · ${stagedTotal} ready to commit · scanned ${scanTime || "now"}`
     : "Waiting for a Git repository";
 
   const identity = summary?.identity || {};
@@ -1395,19 +1397,18 @@ function renderSummary() {
     elements.commitGuidance.textContent = "Required first step: connect this local branch to GitHub history. Commit and Publish unlock afterward.";
   } else if (!identityReady) {
     elements.commitGuidance.textContent = "Step 1 of 3: save a commit author. Then stage, commit, and publish.";
-  } else if (stagedFiles.length === 0) {
+  } else if (stagedTotal === 0) {
     elements.commitGuidance.textContent = "Step 1 of 3: stage the files you want. Step 2: commit. Step 3: publish.";
   } else {
-    const stagedCopy = `${stagedFiles.length} file${stagedFiles.length === 1 ? " is" : "s are"} already staged and will stay staged after Branchline closes.`;
-    const remainingCopy = unstagedFiles.length > 0
-      ? ` ${unstagedFiles.length} file${unstagedFiles.length === 1 ? " has" : "s have"} unstaged work that will not be included unless you stage it.`
+    const stagedCopy = `${stagedTotal} file${stagedTotal === 1 ? " is" : "s are"} already staged and will stay staged after Branchline closes.`;
+    const remainingCopy = unstagedTotal > 0
+      ? ` ${unstagedTotal} file${unstagedTotal === 1 ? " has" : "s have"} unstaged work that will not be included unless you stage it.`
       : "";
     elements.commitGuidance.textContent = `${stagedCopy}${remainingCopy} Enter a message, then commit to ${currentBranchLabel}; choose Commit staged & publish when you want both steps now.`;
   }
 
-  const conflictedFiles = changedFiles.filter((file) => file.state === "conflicted");
-  elements.fileNotice.classList.toggle("is-hidden", conflictedFiles.length === 0);
-  elements.fileNotice.textContent = conflictedFiles.length > 0 ? `${conflictedFiles.length} conflicted file${conflictedFiles.length === 1 ? " needs" : "s need"} resolution. Preview each difference, edit it in your normal editor, stage the resolution, then commit—or abort the operation.` : "";
+  elements.fileNotice.classList.toggle("is-hidden", conflictTotal === 0);
+  elements.fileNotice.textContent = conflictTotal > 0 ? `${conflictTotal} conflicted file${conflictTotal === 1 ? " needs" : "s need"} resolution. Preview each difference, edit it in your normal editor, stage the resolution, then commit—or abort the operation.` : "";
 
   const operation = String(summary?.operation || "");
   elements.operationNotice.classList.toggle("is-hidden", !operation);
@@ -1432,9 +1433,9 @@ function updateAvailability() {
   const hasBranches = asArray(state.summary?.branches).length > 0;
   const hasCommits = asArray(state.summary?.commits).length > 0;
   const changes = asArray(state.summary?.changedFiles);
-  const hasChanges = changes.length > 0;
-  const hasStaged = changes.some((file) => ["staged", "mixed"].includes(file.state));
-  const hasUnstaged = changes.some((file) => ["modified", "mixed", "untracked", "deleted", "conflicted"].includes(file.state));
+  const hasChanges = Number(state.summary?.changedCount ?? changes.length) > 0;
+  const hasStaged = Number(state.summary?.stagedCount ?? changes.filter((file) => ["staged", "mixed"].includes(file.state)).length) > 0;
+  const hasUnstaged = Number(state.summary?.unstagedCount ?? changes.filter((file) => ["modified", "mixed", "untracked", "deleted", "conflicted"].includes(file.state)).length) > 0;
   const hasCommitMessage = Boolean(elements.commitMessageInput.value.trim());
   const identityReady = Boolean(state.summary?.identity?.configured);
   const disable = state.busy;
@@ -1482,8 +1483,9 @@ function updateAvailability() {
   elements.switchBranchButton.disabled = !stateHealthy || !hasBranches || !selectedBranch || selectedBranch === currentBranch || Boolean(state.summary?.operation);
   elements.mergeBranchButton.disabled = !stateHealthy || asArray(state.summary?.branches).length < 2 || !mergeSource || !mergeTarget || mergeSource === mergeTarget || hasChanges || Boolean(state.summary?.operation);
   elements.deleteBranchButton.disabled = !stateHealthy || !hasBranches || !selectedBranch || selectedBranch === currentBranch;
-  [elements.showCommitButton, elements.revertCommitButton, elements.resetCommitButton].forEach((button) => { button.disabled = !configured || !hasCommits; });
-  elements.restoreFromCommitButton.disabled = !configured || !hasCommits || !state.selectedFile;
+  elements.showCommitButton.disabled = !configured || !hasCommits;
+  [elements.revertCommitButton, elements.resetCommitButton].forEach((button) => { button.disabled = !stateHealthy || !hasCommits; });
+  elements.restoreFromCommitButton.disabled = !stateHealthy || !hasCommits || !state.selectedFile;
   elements.abortOperationButton.disabled = !configured || !state.summary?.operation;
   elements.saveIdentityButton.disabled = !configured || !elements.identityNameInput.value.trim() || !elements.identityEmailInput.value.trim();
   elements.commitPushButton.disabled = !stateHealthy || !hasCommitMessage || !identityReady || !remoteReady || !hasStaged || relationship === "local-empty" || !["in-sync", "ahead", "unpublished", "remote-empty", "both-empty"].includes(relationship);
@@ -1497,109 +1499,9 @@ function updateAvailability() {
   updateActionEmphasis();
 }
 
-async function refreshLegacy({ manageBusy = true } = {}) {
-  if (state.refreshing) return false;
-  state.refreshing = true;
-  if (manageBusy) setBusy(true, "Reading repository…");
-  try {
-    const previous = state.summary;
-    const next = await api("/api/summary");
-    const repositoryChanged = previous?.repoPath !== next?.repoPath;
-    const localChanged = repositoryChanged || previous?.localStatusSignature !== next?.localStatusSignature || previous?.branch !== next?.branch || previous?.headState !== next?.headState;
-    const remoteChanged = repositoryChanged || previous?.remoteFetchedAt !== next?.remoteFetchedAt || previous?.remoteSnapshot?.branch !== next?.remoteSnapshot?.branch;
-    if (localChanged) state.filePages.local.loaded = false;
-    if (remoteChanged) state.filePages.github.loaded = false;
-    state.summary = next;
-    renderSummary();
-    return true;
-  } catch (error) {
-    toast(error.message || String(error), true);
-    appendActivity({ ok: false, command: "refresh", output: error.message || String(error) });
-    return false;
-  } finally {
-    if (manageBusy) setBusy(false);
-    state.refreshing = false;
-    const page = state.filePages[state.activeRepositoryView];
-    if (state.summary?.isRepo && !page.loaded) window.setTimeout(() => loadFilePage(state.activeRepositoryView, { offset: 0 }), 0);
-  }
-}
-
-async function refreshLocalFilesLegacy({ announce = true } = {}) {
-  const refreshed = await refresh({ manageBusy: announce });
-  if (refreshed && announce) toast("Local files and staging refreshed. GitHub was not contacted.");
-  return refreshed;
-}
-
-async function runActionLegacy(payload, busyMessage = "Running Git safely…") {
-  if (state.busy) return null;
-  setBusy(true, busyMessage);
-  try {
-    const result = await api("/api/action", payload);
-    appendActivity(result);
-    const branch = String(state.summary?.branch || "");
-    const defaultBranch = String(state.summary?.defaultBranch || "main");
-    const publishedTeamBranch = result.ok
-      && ["push", "publishNewBranch", "commitStagedPush"].includes(payload.action)
-      && branch
-      && branch !== defaultBranch;
-    const resultMessage = result.partial
-      ? "The commit succeeded; Publish still needs attention."
-      : publishedTeamBranch
-        ? `Branch ${branch} is on GitHub. Next: open its pull request into ${defaultBranch}.`
-        : result.ok
-          ? actionLabel(result.command)
-          : firstLine(result.output);
-    toast(resultMessage, !result.ok);
-    if (window.BranchlineActions.shouldClearCommitMessage(payload.action, result)) elements.commitMessageInput.value = "";
-    if (result.ok && payload.action === "createBranch") elements.newBranchInput.value = "";
-    const invalidation = window.BranchlineActions.invalidation(payload.action);
-    if (invalidation.local) state.filePages.local.loaded = false;
-    if (invalidation.github) state.filePages.github.loaded = false;
-    await refresh({ manageBusy: false });
-    return result;
-  } catch (error) {
-    const message = error.message || String(error);
-    appendActivity({ ok: false, command: payload.action || "request", output: message });
-    toast(message, true);
-    return null;
-  } finally {
-    setBusy(false);
-  }
-}
-
 function scheduleLocalPoll(delay = state.pollDelay) {
   window.clearTimeout(state.pollTimer);
   state.pollTimer = window.setTimeout(pollLocalStatus, delay);
-}
-
-async function pollLocalStatusLegacy() {
-  if (state.busy || state.refreshing || document.visibilityState !== "visible") {
-    scheduleLocalPoll(10000);
-    return;
-  }
-  try {
-    const local = await api("/api/local-status");
-    const duration = Number(local.durationSeconds || 0);
-    state.pollDelay = duration > 2 ? 60000 : duration > 0.5 ? 30000 : 10000;
-    if (!state.summary || Boolean(local.configured) !== Boolean(state.summary.isRepo)) {
-      await refresh({ manageBusy: false });
-    } else if (local.configured) {
-      const changed = local.signature !== state.summary.localStatusSignature || local.branch !== state.summary.branch || local.headState !== state.summary.headState || local.operation !== state.summary.operation || local.stateOk !== state.summary.stateOk;
-      if (changed) {
-        state.filePages.local.loaded = false;
-        await refresh({ manageBusy: false });
-      } else {
-        state.summary.localScannedAt = local.localScannedAt;
-        elements.lastUpdated.textContent = String(local.localScannedAt || "—").split(" ").pop();
-        elements.localRefreshStatus.textContent = `${Number(local.changedCount || 0)} change${Number(local.changedCount || 0) === 1 ? "" : "s"} · ${Number(local.stagedCount || 0)} ready to commit · scanned ${String(local.localScannedAt || "now").split(" ").pop()}`;
-      }
-    }
-  } catch (error) {
-    state.pollDelay = 30000;
-    window.BranchlineRender.announce(elements.liveStatus, error.message || String(error));
-  } finally {
-    scheduleLocalPoll();
-  }
 }
 
 function revisionsDiffer(left, right, fields = ["repository", "head", "config", "localRefs", "remoteRefs"]) {
@@ -1650,6 +1552,11 @@ function applyLocalStatus(local) {
     || String(state.summary.operation || "") !== String(local.operation || "");
   if (full) return { full: true, localChanged };
   state.summary.changedFiles = asArray(local.changedFiles);
+  state.summary.changedCount = Number(local.changedCount ?? state.summary.changedFiles.length);
+  state.summary.stagedCount = Number(local.stagedCount ?? 0);
+  state.summary.unstagedCount = Number(local.unstagedCount ?? 0);
+  state.summary.conflictCount = Number(local.conflictCount ?? 0);
+  state.summary.changesTruncated = Boolean(local.truncated);
   state.summary.localStatusSignature = String(local.signature || "");
   state.summary.localScannedAt = String(local.localScannedAt || "");
   state.summary.stateOk = Boolean(local.stateOk);
@@ -1736,13 +1643,36 @@ async function refreshLocalFiles({ announce = true } = {}) {
   }
 }
 
+function actionResultMessage(result, payload, context) {
+  if (result?.partial) {
+    if (result.commitCreated) return "The commit is safely saved locally. Publishing still needs attention; read the selected output for the next step.";
+    if (result.phase === "merge" || result.recovery?.nextAction === "resolve-conflicts-or-abort") {
+      return "Integration paused because files conflict. Resolve and stage them, then commit—or abort the merge safely.";
+    }
+    if (["rollback", "tracking-cleanup"].includes(result.phase)) {
+      return firstLine(result.output) || "The operation completed only partly. Use the recovery guidance before continuing.";
+    }
+    return firstLine(result.output) || "The operation completed only partly. Review the selected output before continuing.";
+  }
+  const publishedTeamBranch = result?.ok
+    && ["push", "publishNewBranch", "commitStagedPush"].includes(payload.action)
+    && context.branch
+    && context.branch !== context.defaultBranch;
+  if (publishedTeamBranch) return `Branch ${context.branch} is on GitHub. Next: open its pull request into ${context.defaultBranch}.`;
+  return result?.ok ? actionLabel(result.command) : firstLine(result?.output);
+}
+
 async function runAction(payload, busyMessage = "Running Git safely…") {
   if (state.busy) return null;
+  const context = {
+    branch: String(state.summary?.branch || ""),
+    defaultBranch: String(state.summary?.defaultBranch || "main")
+  };
   setBusy(true, busyMessage);
   try {
     const result = await api("/api/action", payload);
     appendActivity(result);
-    toast(result.partial ? "The commit succeeded; Publish still needs attention." : result.ok ? actionLabel(result.command) : firstLine(result.output), !result.ok);
+    toast(actionResultMessage(result, payload, context), !result.ok);
     if (window.BranchlineActions.shouldClearCommitMessage(payload.action, result)) elements.commitMessageInput.value = "";
     if (result.ok && payload.action === "createBranch") elements.newBranchInput.value = "";
     const scope = window.BranchlineActions.refreshScope(result, payload.action);

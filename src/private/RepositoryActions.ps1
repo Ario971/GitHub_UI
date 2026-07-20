@@ -80,6 +80,34 @@ function Get-StateIndependentActionNames {
     return @(
         "selectRepository", "initializeRepository", "cloneRepository",
         "restoreGitMetadata", "listFiles", "previewFile", "showCommit",
-        "fetch", "githubLogin", "githubResetLogin", "openRepositoryFolder"
+        "githubLogin", "githubResetLogin", "openRepositoryFolder"
     )
+}
+
+function Assert-RepositoryActionPreflight {
+    param([string]$RepoPath, [string]$Action)
+
+    $working = Get-WorkingTreeState -RepoPath $RepoPath -Force
+    if (-not $working.ok) {
+        throw "Repository status is unavailable, so '$Action' was blocked. Repair the Git repository and refresh before changing anything.`n$($working.error)"
+    }
+
+    try {
+        # These fresh reads validate HEAD/index metadata, local refs, repository
+        # configuration, and—when present—the current branch's remote refs.
+        # No cached summary is trusted before a mutation.
+        [void](Get-RepositoryRevisions -RepoPath $RepoPath -WorkingState $working)
+        $branches = @(Get-Branches $RepoPath)
+        $origin = Get-OriginInfo $RepoPath
+        if ($origin.valid -and $working.headState -eq "branch" -and -not [string]::IsNullOrWhiteSpace([string]$working.branch)) {
+            $tracking = Get-TrackingStatus -RepoPath $RepoPath -Branch ([string]$working.branch) -LocalBranches $branches
+            if ([string]$tracking.relationship -eq "error") {
+                throw $(if ([string]::IsNullOrWhiteSpace([string]$tracking.error)) { "Git could not compare local and GitHub tracking state." } else { [string]$tracking.error })
+            }
+        }
+    }
+    catch {
+        throw "Repository branch or tracking state is unavailable, so '$Action' was blocked. Nothing was changed.`n$($_.Exception.Message)"
+    }
+    return $working
 }

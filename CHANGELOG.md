@@ -33,9 +33,16 @@ All notable Branchline changes are recorded here. The project follows semantic v
 - Local file browsing reuses the complete porcelain status snapshot for untracked paths instead of scanning the working tree twice.
 - The branch panel now presents the standard team sequence before advanced local merging and guides a clean stale `main` through GitHub integration before branch creation.
 - The interruptible local server accept interval was reduced without adding network polling, improving UI response latency while preserving low idle activity.
+- Git reads now distinguish a genuinely missing value from corrupt configuration, history, index, and branch-reference failures; every mutating action uses a fresh fail-closed preflight.
+- Timeout cleanup is fully bounded and reports whether Windows confirmed the entire Git child-process tree stopped.
+- STOP can safely verify and terminate this installation while its single-threaded server is occupied by a long request, without deleting a valid runtime marker.
+- Large working-tree and remote-difference payloads are capped at 500 visible entries while exact aggregate counts and lazy paginated browsers remain available.
+- Remote blobs are classified from raw bytes with strict UTF-8 decoding, preventing invalid binary content from being rendered as text.
+- Partial-result notifications now distinguish saved commits, merge conflicts, rollback failures, and tracking-cleanup failures.
+- Publishing a new GitHub branch reuses its safety fetch instead of immediately fetching a second time.
 
 ### Removed
 
-- Obsolete legacy API actions, the empty Word document, and the encoded `start-source.b64` artifact.
+- Obsolete legacy API actions and duplicate legacy frontend/backend implementations, the empty Word document, and the encoded `start-source.b64` artifact.
 
 This beta does not include automatic updates, code signing, an embedded editor, automatic PR merging, tags, or a GitHub Release.

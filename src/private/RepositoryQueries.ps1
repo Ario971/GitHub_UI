@@ -13,7 +13,7 @@ function Assert-SafeRepositoryPath {
     param([string]$RepoPath, [string]$Path, [switch]$MayBeMissing)
     if ([string]::IsNullOrWhiteSpace($Path) -or [System.IO.Path]::IsPathRooted($Path)) { throw "Choose a repository file first." }
     $normalized = $Path.Replace('\', '/').TrimStart('/')
-    if ($normalized -eq ".git" -or $normalized.StartsWith(".git/") -or $normalized -match '(^|/)\.\.(/|$)' -or $normalized.Contains(":")) { throw "That file path is not allowed." }
+    if ($normalized -imatch '(^|/)\.git(?:/|$)' -or $normalized -match '(^|/)\.\.(/|$)' -or $normalized.Contains(":")) { throw "That file path is not allowed." }
     $root = [System.IO.Path]::GetFullPath($RepoPath).TrimEnd('\')
     $candidate = [System.IO.Path]::GetFullPath((Join-Path $root $normalized.Replace('/', '\')))
     if (-not $candidate.StartsWith($root + '\', [System.StringComparison]::OrdinalIgnoreCase)) { throw "That file path leaves the selected repository." }
@@ -43,70 +43,6 @@ function Test-PreviewBinaryText {
         if ($code -lt 32 -and $code -notin @(9, 10, 13)) { $controls += 1 }
     }
     return (($controls / [double]$sampleLength) -gt 0.02)
-}
-
-function Get-RepositoryFilePageLegacy {
-    param([string]$RepoPath, [string]$Side, [string]$Query, [int]$Offset, [int]$Limit)
-    $normalizedSide = if ($Side -ceq "github") { "github" } else { "local" }
-    $paths = @()
-    $statusMap = @{}
-    $trackedSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-    $branch = ""
-
-    if ($normalizedSide -eq "local") {
-        $working = Get-WorkingTreeState $RepoPath
-        if (-not $working.ok) { throw "Branchline could not list local files because repository status failed.`n$($working.error)" }
-        foreach ($file in @($working.files)) { $statusMap[[string]$file.path] = $file }
-        $tracked = Invoke-GitCommand -WorkingDirectory $RepoPath -Arguments @("-c", "core.quotepath=false", "ls-files", "--cached", "-z") -DisplayCommand "list tracked files" -TimeoutSeconds 30
-        if (-not $tracked.ok) { throw "Branchline could not list tracked files.`n$($tracked.output)" }
-        foreach ($value in @(Get-NulItems $tracked.raw)) { [void]$trackedSet.Add(([string]$value).Replace('\', '/')) }
-        $all = Invoke-GitCommand -WorkingDirectory $RepoPath -Arguments @("-c", "core.quotepath=false", "ls-files", "--cached", "--others", "--exclude-standard", "-z") -DisplayCommand "list local repository files" -TimeoutSeconds 30
-        if (-not $all.ok) { throw "Branchline could not list local repository files.`n$($all.output)" }
-        $paths = @(Get-NulItems $all.raw | ForEach-Object { ([string]$_).Replace('\', '/') })
-        foreach ($file in @($working.files)) {
-            if ($paths -cnotcontains [string]$file.path) { $paths += [string]$file.path }
-        }
-        $branch = Get-CurrentBranch $RepoPath
-    }
-    else {
-        [void](Assert-OriginAllowed $RepoPath)
-        $branch = Get-CurrentBranch $RepoPath
-        if ([string]::IsNullOrWhiteSpace($branch)) { throw "Create a named local branch before browsing its GitHub counterpart." }
-        $tracking = Get-TrackingStatus -RepoPath $RepoPath -Branch $branch
-        $remoteBranch = if ($tracking.matchingRemoteExists) { [string]$tracking.remoteBranch } else { [string]$tracking.remoteDefaultBranch }
-        if ([string]::IsNullOrWhiteSpace($remoteBranch)) { throw "No fetched GitHub branch is available to browse." }
-        $branch = $remoteBranch
-        $remoteRef = "refs/remotes/origin/$remoteBranch"
-        $tree = Invoke-GitCommand -WorkingDirectory $RepoPath -Arguments @("-c", "core.quotepath=false", "ls-tree", "-r", "--name-only", "-z", $remoteRef) -DisplayCommand "list fetched GitHub files" -TimeoutSeconds 30
-        if (-not $tree.ok) { throw "Branchline could not list the fetched GitHub files.`n$($tree.output)" }
-        $paths = @(Get-NulItems $tree.raw | ForEach-Object { ([string]$_).Replace('\', '/') })
-        $snapshot = Get-RemoteSnapshot -RepoPath $RepoPath -Tracking $tracking
-        foreach ($incoming in @($snapshot.incomingFiles)) { $statusMap[[string]$incoming] = [pscustomobject]@{ state = "incoming"; status = ""; tracked = $true } }
-    }
-
-    $queryValue = if ($null -eq $Query) { "" } else { $Query.Trim() }
-    $unique = @($paths | Sort-Object -Unique | Where-Object { [string]::IsNullOrWhiteSpace($queryValue) -or ([string]$_).IndexOf($queryValue, [System.StringComparison]::OrdinalIgnoreCase) -ge 0 })
-    $total = $unique.Count
-    $page = @($unique | Select-Object -Skip $Offset -First $Limit | ForEach-Object {
-        $path = [string]$_
-        $status = if ($statusMap.ContainsKey($path)) { $statusMap[$path] } else { $null }
-        [pscustomobject]@{
-            path = $path
-            tracked = if ($normalizedSide -eq "github") { $true } else { $trackedSet.Contains($path) }
-            status = if ($null -ne $status) { [string]$status.status } else { "" }
-            state = if ($null -ne $status) { [string]$status.state } elseif ($normalizedSide -eq "github") { "remote" } else { "unchanged" }
-        }
-    })
-    return [pscustomobject]@{
-        side = $normalizedSide
-        branch = $branch
-        query = $queryValue
-        offset = $Offset
-        limit = $Limit
-        total = $total
-        nextOffset = if (($Offset + $page.Count) -lt $total) { $Offset + $page.Count } else { -1 }
-        items = $page
-    }
 }
 
 function Get-RepositoryFilePage {
@@ -156,6 +92,10 @@ function Get-RepositoryFilePage {
             $paths = $pathsList.ToArray()
             $index = [pscustomobject]@{ side = "local"; branch = [string]$working.branch; revision = $indexKey; total = $paths.Count; paths = $paths; statusMap = $statusMap; untracked = $untrackedSet }
             Set-BranchlineCacheEntry -Name "local-files" -Key $indexKey -Value $index -SizeBytes $estimatedBytes | Out-Null
+            # A summary created before the lazy browser opened contains only
+            # changed-file fallbacks. Rebuild it once so its compatibility
+            # fields use this complete, cached index instead of staying stale.
+            Remove-BranchlineCacheEntry -Name "summary"
         }
     }
     else {
@@ -179,9 +119,12 @@ function Get-RepositoryFilePage {
         if ($null -eq $index) {
             $tree = Invoke-GitCommand -WorkingDirectory $RepoPath -Arguments @("-c", "core.quotepath=false", "ls-tree", "-r", "--name-only", "-z", $remoteRef) -DisplayCommand "index fetched GitHub files" -TimeoutSeconds 30 -ReadOnly
             if (-not $tree.ok) { throw "Branchline could not list the fetched GitHub files.`n$($tree.output)" }
-            $snapshot = Get-RemoteSnapshot -RepoPath $RepoPath -Tracking $tracking -HeadCommit ([string]$working.headCommit)
             $incomingSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-            foreach ($incoming in @($snapshot.incomingFiles)) { [void]$incomingSet.Add([string]$incoming) }
+            if ([string]$tracking.relationship -in @("behind", "diverged")) {
+                $incoming = Invoke-GitCommand -WorkingDirectory $RepoPath -Arguments @("-c", "core.quotepath=false", "diff", "--name-only", "-z", "HEAD..$remoteRef") -DisplayCommand "index fetched GitHub differences" -TimeoutSeconds 30 -ReadOnly
+                if (-not $incoming.ok) { throw "Branchline could not index the fetched GitHub differences.`n$($incoming.output)" }
+                foreach ($incomingPath in @(Get-NulItems $incoming.raw)) { [void]$incomingSet.Add(([string]$incomingPath).Replace('\', '/')) }
+            }
             $paths = @(Get-NulItems $tree.raw | ForEach-Object { ([string]$_).Replace('\', '/') })
             $estimatedBytes = [int64](4096 + (($paths | ForEach-Object { ([string]$_).Length * 2 + 40 } | Measure-Object -Sum).Sum))
             $index = [pscustomobject]@{ side = "github"; branch = $remoteBranch; revision = $indexKey; total = $paths.Count; paths = $paths; incoming = $incomingSet }
@@ -270,10 +213,11 @@ function Get-RepositoryFilePreview {
         if (-not $size.ok -or -not [int64]::TryParse($size.raw.Trim(), [ref]$byteLength)) { throw "Branchline could not measure the fetched GitHub file." }
         if ($byteLength -gt $script:MaxPreviewBytes) { $kind = "too-large" }
         else {
-            $blob = Invoke-GitCommand -WorkingDirectory $RepoPath -Arguments @("cat-file", "blob", $objectId) -DisplayCommand "read fetched GitHub file" -TimeoutSeconds 30 -ReadOnly
+            $blob = Invoke-GitCommand -WorkingDirectory $RepoPath -Arguments @("cat-file", "blob", $objectId) -DisplayCommand "read fetched GitHub file" -TimeoutSeconds 30 -ReadOnly -CaptureBytes
             if (-not $blob.ok) { throw "Branchline could not read the fetched GitHub file." }
-            $content = [string]$blob.raw
-            if (Test-PreviewBinaryText $content) { $kind = "binary"; $content = "" }
+            try { $content = (New-Object System.Text.UTF8Encoding($false, $true)).GetString([byte[]]$blob.bytes) }
+            catch { $kind = "binary"; $content = "" }
+            if ($kind -eq "text" -and (Test-PreviewBinaryText $content)) { $kind = "binary"; $content = "" }
         }
         $head = Invoke-GitCommand -WorkingDirectory $RepoPath -Arguments @("rev-parse", "--verify", "HEAD") -DisplayCommand "check local comparison base" -TimeoutSeconds 10 -ReadOnly
         if ($head.ok) {

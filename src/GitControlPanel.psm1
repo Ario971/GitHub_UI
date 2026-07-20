@@ -330,7 +330,8 @@ function Redact-RemoteValue {
 
 function Get-OriginInfo {
     param([string]$RepoPath)
-    $result = Invoke-GitCommand -WorkingDirectory $RepoPath -Arguments @("remote", "get-url", "origin") -DisplayCommand "read origin" -TimeoutSeconds 10 -ReadOnly
+    $result = Invoke-GitCommand -WorkingDirectory $RepoPath -Arguments @("config", "--get", "remote.origin.url") -DisplayCommand "read origin" -TimeoutSeconds 10 -ReadOnly
+    if (-not $result.ok -and $result.code -ne 1) { throw "Git could not read the origin configuration.`n$($result.output)" }
     if (-not $result.ok -or [string]::IsNullOrWhiteSpace($result.raw)) {
         return [pscustomobject]@{ configured = $false; valid = $false; type = "none"; gitUrl = ""; display = ""; webUrl = ""; owner = ""; repository = "" }
     }
@@ -573,7 +574,7 @@ function Resolve-RepositoryFile {
         throw "Choose a repository file first."
     }
     $normalized = $Path.Replace('\', '/').TrimStart('/')
-    if ($normalized -eq ".git" -or $normalized.StartsWith(".git/") -or $normalized -match '(^|/)\.\.(/|$)' -or $normalized.Contains(":")) {
+    if ($normalized -imatch '(^|/)\.git(?:/|$)' -or $normalized -match '(^|/)\.\.(/|$)' -or $normalized.Contains(":")) {
         throw "That file path is not allowed."
     }
 
@@ -592,7 +593,9 @@ function Resolve-RepositoryFile {
 function Test-TrackedFile {
     param([string]$RepoPath, [string]$Path)
     $result = Invoke-GitCommand -WorkingDirectory $RepoPath -Arguments @("--literal-pathspecs", "ls-files", "--error-unmatch", "--", $Path) -DisplayCommand "check tracked file" -TimeoutSeconds 10 -ReadOnly
-    return $result.ok
+    if ($result.ok) { return $true }
+    if ($result.code -eq 1) { return $false }
+    throw "Git could not verify whether '$Path' is tracked.`n$($result.output)"
 }
 
 function Get-CurrentBranch {
@@ -618,27 +621,31 @@ function Test-BranchName {
 
 function Get-Branches {
     param([string]$RepoPath)
-    $result = Invoke-GitCommand -WorkingDirectory $RepoPath -Arguments @("for-each-ref", "--format=%(refname:short)%09%(HEAD)%09%(upstream:short)", "refs/heads") -DisplayCommand "read branches" -TimeoutSeconds 15 -ReadOnly
+    $result = Invoke-GitCommand -WorkingDirectory $RepoPath -Arguments @("for-each-ref", "--format=%(refname:short)%09%(HEAD)%09%(upstream:short)%09%(objectname)%09%(objecttype)", "refs/heads") -DisplayCommand "read branches" -TimeoutSeconds 15 -ReadOnly
     if (-not $result.ok) { throw "Branchline could not read local branches.`n$($result.output)" }
     return @($result.raw -split '(?:\r\n|\n|\r)' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | ForEach-Object {
-        $parts = $_ -split "`t", 3
-        if ($parts.Count -ge 2 -and -not [string]::IsNullOrWhiteSpace($parts[0])) {
-            [pscustomobject]@{ name = $parts[0]; current = ($parts[1] -eq "*"); upstream = if ($parts.Count -ge 3) { $parts[2] } else { "" } }
+        $parts = $_ -split "`t", 5
+        if ($parts.Count -lt 5 -or [string]::IsNullOrWhiteSpace($parts[0]) -or $parts[3] -notmatch '^[0-9a-f]{40,64}$' -or $parts[4] -cne "commit") {
+            throw "A local branch reference could not be resolved to a commit. Repair the Git references before changing this repository."
         }
+        [pscustomobject]@{ name = $parts[0]; current = ($parts[1] -eq "*"); upstream = $parts[2] }
     })
 }
 
 function Get-RemoteReferenceInfo {
     param([string]$RepoPath)
-    $result = Invoke-GitCommand -WorkingDirectory $RepoPath -Arguments @("for-each-ref", "--format=%(refname:strip=3)%09%(symref)", "refs/remotes/origin") -DisplayCommand "read remote branches" -TimeoutSeconds 15 -ReadOnly
+    $result = Invoke-GitCommand -WorkingDirectory $RepoPath -Arguments @("for-each-ref", "--format=%(refname:strip=3)%09%(symref)%09%(objectname)%09%(objecttype)", "refs/remotes/origin") -DisplayCommand "read remote branches" -TimeoutSeconds 15 -ReadOnly
     if (-not $result.ok) { throw "Branchline could not read the fetched GitHub branches.`n$($result.output)" }
     $branches = New-Object System.Collections.Generic.List[string]
     $defaultBranch = ""
     foreach ($line in @($result.raw -split '(?:\r\n|\n|\r)' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })) {
-        $parts = $line -split "`t", 2
+        $parts = $line -split "`t", 4
+        if ($parts.Count -lt 4 -or $parts[2] -notmatch '^[0-9a-f]{40,64}$' -or $parts[3] -cne "commit") {
+            throw "A fetched GitHub reference could not be resolved to a commit. Check GitHub again or repair the remote references before changing this repository."
+        }
         $name = $parts[0].Trim()
         if ($name -eq "HEAD") {
-            if ($parts.Count -ge 2 -and $parts[1].Trim() -match '^refs/remotes/origin/(.+)$') { $defaultBranch = $Matches[1] }
+            if ($parts[1].Trim() -match '^refs/remotes/origin/(.+)$') { $defaultBranch = $Matches[1] }
         }
         elseif (-not [string]::IsNullOrWhiteSpace($name)) { $branches.Add($name) }
     }
@@ -664,20 +671,24 @@ function Test-GitRef {
     param([string]$RepoPath, [string]$Ref)
     if ([string]::IsNullOrWhiteSpace($Ref)) { return $false }
     $result = Invoke-GitCommand -WorkingDirectory $RepoPath -Arguments @("show-ref", "--verify", "--quiet", $Ref) -DisplayCommand "check Git reference" -TimeoutSeconds 10 -ReadOnly
-    return $result.ok
+    if ($result.ok) { return $true }
+    if ($result.code -eq 1) { return $false }
+    throw "Git could not read reference '$Ref'.`n$($result.output)"
 }
 
 function Test-RefsRelated {
     param([string]$RepoPath, [string]$Left, [string]$Right)
     $result = Invoke-GitCommand -WorkingDirectory $RepoPath -Arguments @("merge-base", $Left, $Right) -DisplayCommand "compare repository histories" -TimeoutSeconds 15 -ReadOnly
-    return $result.ok
+    if ($result.ok) { return $true }
+    if ($result.code -eq 1) { return $false }
+    throw "Git could not compare '$Left' and '$Right'.`n$($result.output)"
 }
 
 function Get-RecentCommits {
     param([string]$RepoPath)
     $format = "%H%x1f%h%x1f%s%x1f%cr%x1e"
     $result = Invoke-GitCommand -WorkingDirectory $RepoPath -Arguments @("--no-pager", "log", "-80", "--format=$format") -DisplayCommand "read history" -TimeoutSeconds 20 -ReadOnly
-    if (-not $result.ok) { return @() }
+    if (-not $result.ok) { throw "Git could not read repository history.`n$($result.output)" }
     return @($result.raw.Split([char]0x1e) | ForEach-Object {
         $record = $_.Trim("`r", "`n")
         if (-not [string]::IsNullOrWhiteSpace($record)) {
@@ -774,7 +785,7 @@ function Get-RangeCommits {
     if ([string]::IsNullOrWhiteSpace($Range)) { return @() }
     $format = "%H%x1f%h%x1f%s%x1f%cr%x1e"
     $result = Invoke-GitCommand -WorkingDirectory $RepoPath -Arguments @("--no-pager", "log", "-40", "--format=$format", $Range) -DisplayCommand "read comparison history" -TimeoutSeconds 20 -ReadOnly
-    if (-not $result.ok) { return @() }
+    if (-not $result.ok) { throw "Git could not read comparison history '$Range'.`n$($result.output)" }
     return @($result.raw.Split([char]0x1e) | ForEach-Object {
         $record = $_.Trim("`r", "`n")
         if (-not [string]::IsNullOrWhiteSpace($record)) {
@@ -808,7 +819,8 @@ function Get-RemoteSnapshot {
     $outgoingCommits = @()
     if ([string]$Tracking.relationship -in @("behind", "diverged")) {
         $incoming = Invoke-GitCommand -WorkingDirectory $RepoPath -Arguments @("-c", "core.quotepath=false", "diff", "--name-only", "-z", "HEAD..$remoteRef") -DisplayCommand "read incoming files" -TimeoutSeconds 30 -ReadOnly
-        if ($incoming.ok) { $incomingPaths = @(Get-NulItems $incoming.raw) }
+        if (-not $incoming.ok) { throw "Git could not read incoming file differences.`n$($incoming.output)" }
+        $incomingPaths = @(Get-NulItems $incoming.raw)
         $incomingCommits = @(Get-RangeCommits -RepoPath $RepoPath -Range "HEAD..$remoteRef")
     }
     if ([string]$Tracking.relationship -in @("ahead", "diverged")) {
@@ -816,8 +828,8 @@ function Get-RemoteSnapshot {
     }
     $files = @($incomingPaths | Select-Object -First 500 | ForEach-Object { [pscustomobject]@{ path = ([string]$_).Replace('\', '/'); state = "incoming" } })
     $snapshot = [pscustomobject]@{
-        available = $true; branch = $remoteBranch; files = $files; fileCount = $files.Count; truncated = ($incomingPaths.Count -gt 500)
-        incomingFiles = @($incomingPaths | ForEach-Object { ([string]$_).Replace('\', '/') })
+        available = $true; branch = $remoteBranch; files = $files; fileCount = $incomingPaths.Count; truncated = ($incomingPaths.Count -gt 500)
+        incomingFiles = @($incomingPaths | Select-Object -First 500 | ForEach-Object { ([string]$_).Replace('\', '/') })
         incomingCommits = $incomingCommits; outgoingCommits = $outgoingCommits
     }
     $script:AppState.RemoteSnapshotKey = $snapshotKey
@@ -830,6 +842,7 @@ function Get-GitIdentity {
     $result = Invoke-GitCommand -WorkingDirectory $RepoPath -Arguments @("config", "--local", "--get-regexp", "^user\.(name|email)$") -DisplayCommand "read repository commit identity" -TimeoutSeconds 10 -ReadOnly
     $name = ""
     $email = ""
+    if (-not $result.ok -and $result.code -ne 1) { throw "Git could not read the repository commit identity.`n$($result.output)" }
     if ($result.ok) {
         foreach ($line in @($result.raw -split '(?:\r\n|\n|\r)')) {
             if ($line -match '^user\.name\s+(.*)$') { $name = $Matches[1].Trim() }
@@ -843,6 +856,7 @@ function Get-GitIdentity {
         $effectiveResult = Invoke-GitCommand -WorkingDirectory $RepoPath -Arguments @("config", "--get-regexp", "^user\.(name|email)$") -DisplayCommand "read effective commit identity" -TimeoutSeconds 10 -ReadOnly
         $inheritedName = ""
         $inheritedEmail = ""
+        if (-not $effectiveResult.ok -and $effectiveResult.code -ne 1) { throw "Git could not read the effective commit identity.`n$($effectiveResult.output)" }
         if ($effectiveResult.ok) {
             foreach ($line in @($effectiveResult.raw -split '(?:\r\n|\n|\r)')) {
                 if ($line -match '^user\.name\s+(.*)$') { $inheritedName = $Matches[1].Trim() }
@@ -1026,7 +1040,8 @@ function Invoke-AdoptRemoteHistory {
             try {
                 $currentAfterFailure = Get-CurrentBranch $RepoPath
                 if (-not [string]::IsNullOrWhiteSpace($currentAfterFailure)) {
-                    [void](Invoke-GitCommand -WorkingDirectory $RepoPath -Arguments @("update-ref", "-d", "refs/heads/$currentAfterFailure") -DisplayCommand "remove partial adopted branch" -TimeoutSeconds 15)
+                    $removePartialBranch = Invoke-GitCommand -WorkingDirectory $RepoPath -Arguments @("update-ref", "-d", "refs/heads/$currentAfterFailure") -DisplayCommand "remove partial adopted branch" -TimeoutSeconds 15
+                    if (-not $removePartialBranch.ok) { throw "The partial branch reference could not be removed.`n$($removePartialBranch.output)" }
                 }
                 [System.IO.File]::WriteAllText($headPath, $originalHead, (New-Object System.Text.UTF8Encoding($false)))
             }
@@ -1117,8 +1132,10 @@ function Save-RemoteConfigurationRecovery {
     $gitDirectory = Get-GitDirectoryPath $RepoPath
     $recoveryDirectory = Join-Path $gitDirectory "branchline\remote-recovery"
     [System.IO.Directory]::CreateDirectory($recoveryDirectory) | Out-Null
-    $origin = Invoke-GitCommand -WorkingDirectory $RepoPath -Arguments @("remote", "get-url", "origin") -DisplayCommand "read previous origin" -TimeoutSeconds 10
-    $branches = Invoke-GitCommand -WorkingDirectory $RepoPath -Arguments @("for-each-ref", "--format=%(refname:short)%09%(upstream:short)", "refs/heads") -DisplayCommand "read previous upstreams" -TimeoutSeconds 15
+    $origin = Invoke-GitCommand -WorkingDirectory $RepoPath -Arguments @("config", "--get", "remote.origin.url") -DisplayCommand "read previous origin" -TimeoutSeconds 10 -ReadOnly
+    $branches = Invoke-GitCommand -WorkingDirectory $RepoPath -Arguments @("for-each-ref", "--format=%(refname:short)%09%(upstream:short)", "refs/heads") -DisplayCommand "read previous upstreams" -TimeoutSeconds 15 -ReadOnly
+    if (-not $origin.ok -and $origin.code -ne 1) { throw "The previous origin could not be recorded safely.`n$($origin.output)" }
+    if (-not $branches.ok) { throw "Previous branch tracking could not be recorded safely.`n$($branches.output)" }
     $record = [ordered]@{
         createdAt = (Get-Date).ToString("o")
         origin = if ($origin.ok) { $origin.raw.Trim() } else { "" }
@@ -1138,15 +1155,19 @@ function New-SafetyReference {
 }
 
 function Invoke-PublishCurrentBranch {
-    param([string]$RepoPath)
+    param(
+        [string]$RepoPath,
+        [object]$PreparedFetch = $null,
+        [object]$PreparedTracking = $null
+    )
     [void](Assert-OriginAllowed $RepoPath)
     $branch = Get-CurrentBranch $RepoPath
     if (-not (Test-BranchName -RepoPath $RepoPath -Branch $branch)) { throw "The current branch cannot be published." }
     $head = Invoke-GitCommand -WorkingDirectory $RepoPath -Arguments @("rev-parse", "--verify", "HEAD") -DisplayCommand "check local history" -TimeoutSeconds 10
     if (-not $head.ok) { throw "Create the first commit before publishing this branch." }
-    $fetch = Invoke-OriginFetch -RepoPath $RepoPath -DisplayCommand "check GitHub before publishing"
+    $fetch = if ($null -ne $PreparedFetch) { $PreparedFetch } else { Invoke-OriginFetch -RepoPath $RepoPath -DisplayCommand "check GitHub before publishing" }
     if (-not $fetch.ok) { return $fetch }
-    $tracking = Get-TrackingStatus -RepoPath $RepoPath -Branch $branch
+    $tracking = if ($null -ne $PreparedTracking) { $PreparedTracking } else { Get-TrackingStatus -RepoPath $RepoPath -Branch $branch }
     if ($tracking.mismatch) { throw "This branch tracks '$($tracking.upstream)', not origin/$branch. Fix the upstream explicitly before publishing." }
     switch ([string]$tracking.relationship) {
         "unrelated" { throw "Publishing is blocked because the local project and GitHub repository have unrelated histories. Clone GitHub into an empty folder, or connect this local project to a different empty GitHub repository." }
@@ -1249,7 +1270,7 @@ if (-not (Test-Path -LiteralPath $repositoryStatePath -PathType Leaf)) { throw "
 
 function Get-LocalStatusSummary {
     if ([string]::IsNullOrWhiteSpace($script:AppState.RepoPath) -or -not (Test-GitRepository $script:AppState.RepoPath)) {
-        return [pscustomobject]@{ ok = $false; configured = $false; stateOk = $true; stateError = ""; branch = ""; headState = "none"; headCommit = ""; upstream = ""; ahead = 0; behind = 0; operation = ""; changedCount = 0; stagedCount = 0; changedFiles = @(); signature = ""; localScannedAt = ""; durationSeconds = 0; scanDurationMs = 0; revisions = @{ repository = ""; local = ""; head = ""; config = ""; localRefs = ""; remoteRefs = "" } }
+        return [pscustomobject]@{ ok = $false; configured = $false; stateOk = $true; stateError = ""; branch = ""; headState = "none"; headCommit = ""; upstream = ""; ahead = 0; behind = 0; operation = ""; changedCount = 0; stagedCount = 0; unstagedCount = 0; conflictCount = 0; changedFiles = @(); signature = ""; localScannedAt = ""; durationSeconds = 0; scanDurationMs = 0; revisions = @{ repository = ""; local = ""; head = ""; config = ""; localRefs = ""; remoteRefs = "" } }
     }
     $repo = $script:AppState.RepoPath
     $health = Get-RepositoryHealthSnapshot $repo -Force
@@ -1276,6 +1297,8 @@ function Get-LocalStatusSummary {
         operation = [string]$health.operation
         changedCount = $files.Count
         stagedCount = @($files | Where-Object { $_.state -in @("staged", "mixed") }).Count
+        unstagedCount = @($files | Where-Object { $_.state -in @("modified", "mixed", "untracked", "deleted", "conflicted") }).Count
+        conflictCount = @($files | Where-Object { $_.state -eq "conflicted" }).Count
         changedFiles = @($files | Select-Object -First 500)
         truncated = ($files.Count -gt 500)
         signature = [string]$working.signature
@@ -1283,110 +1306,6 @@ function Get-LocalStatusSummary {
         durationSeconds = [double]$working.durationSeconds
         scanDurationMs = [double]$working.durationMilliseconds
         revisions = $revisions
-    }
-}
-
-function Get-AppSummaryLegacy {
-    $now = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
-    $emptySnapshot = [pscustomobject]@{ available = $false; branch = ""; files = @(); fileCount = 0; truncated = $false; incomingFiles = @(); incomingCommits = @(); outgoingCommits = @() }
-    if ([string]::IsNullOrWhiteSpace($script:AppState.RepoPath)) {
-        $folder = Get-FolderState $script:AppState.SelectedPath
-        return [pscustomobject]@{
-            ok = $false; configured = $false; isRepo = $false; folderSelected = $folder.selected; selectedPath = $folder.path; repoPath = $folder.path; folder = $folder; message = $script:AppState.StartupMessage
-            stateOk = $true; stateError = ""; headState = "none"; headCommit = ""; branch = ""; remote = ""; remoteWebUrl = ""; remoteType = "none"; remoteValid = $false
-            tracking = @{ hasUpstream = $false; upstream = ""; upstreamExists = $false; ahead = 0; behind = 0; mismatch = $false; relationship = "no-repository"; error = "" }
-            identity = @{ configured = $false; name = ""; email = ""; inheritedAvailable = $false; inheritedName = ""; inheritedEmail = ""; source = "missing" }
-            remoteSnapshot = $emptySnapshot
-            changedFiles = @(); files = @(); fileCount = 0; filesTruncated = $false; branches = @(); remoteBranches = @(); defaultBranch = ""; commits = @(); operation = ""; busy = $script:AppState.Busy
-            localScannedAt = ""; remoteFetchedAt = $script:AppState.RemoteFetchedAt; localStatusSignature = ""; timestamp = $now
-        }
-    }
-
-    $repoPath = $script:AppState.RepoPath
-    if (-not (Test-GitRepository $repoPath)) {
-        $script:AppState.SelectedPath = $repoPath
-        $script:AppState.RepoPath = ""
-        return Get-AppSummary
-    }
-
-    $errors = New-Object System.Collections.Generic.List[string]
-    # A full summary is an explicit synchronization boundary. Always rescan the
-    # working tree so edits made by an editor or the Git CLI cannot be hidden by
-    # the short local-status cache.
-    $health = Get-RepositoryHealthSnapshot $repoPath -Force
-    $head = $health.head
-    if (-not $health.ok) { $errors.Add([string]$health.error) }
-    $branch = [string]$head.branch
-    $branches = @()
-    try { $branches = @(Get-Branches $repoPath) }
-    catch { $errors.Add($_.Exception.Message) }
-    $working = $health.working
-    $changed = @(if ($working.ok) { @($working.files) } else { @() })
-    $filesSnapshot = [pscustomobject]@{ files = @($changed); total = @($changed).Count; truncated = $false }
-    if ($working.ok) {
-        try { $filesSnapshot = Get-RepositoryFiles -RepoPath $repoPath -ChangedFiles $changed }
-        catch { $errors.Add($_.Exception.Message) }
-    }
-    $origin = Get-OriginInfo $repoPath
-    $tracking = [pscustomobject]@{ hasUpstream = $false; upstream = ""; upstreamExists = $false; mismatch = $false; matchingRemoteExists = $false; remoteBranch = $branch; remoteDefaultBranch = ""; remoteHasBranches = $false; remoteBranchNames = @(); hasLocalCommit = $false; ahead = 0; behind = 0; diverged = $false; relationship = if ($origin.valid) { "error" } else { "no-remote" }; error = "" }
-    if ($head.state -ne "detached" -and -not [string]::IsNullOrWhiteSpace($branch)) {
-        try {
-            if ($origin.valid) { $tracking = Get-TrackingStatus -RepoPath $repoPath -Branch $branch -LocalBranches $branches }
-            else { $tracking.hasLocalCommit = Test-GitRef -RepoPath $repoPath -Ref "refs/heads/$branch" }
-        }
-        catch {
-            $errors.Add($_.Exception.Message)
-            $tracking.relationship = "error"
-            $tracking.error = $_.Exception.Message
-        }
-    }
-    elseif ($head.state -eq "detached") {
-        $tracking.relationship = "detached"
-        $tracking.error = "Create a named branch before committing, pulling, or publishing."
-    }
-    $remoteSnapshot = $emptySnapshot
-    if ($origin.valid -and $tracking.relationship -ne "error") {
-        try { $remoteSnapshot = Get-RemoteSnapshot -RepoPath $repoPath -Tracking $tracking }
-        catch { $errors.Add($_.Exception.Message); $tracking.relationship = "error"; $tracking.error = $_.Exception.Message }
-    }
-    $stateOk = ($errors.Count -eq 0)
-    $stateError = ($errors -join "`n")
-    return [pscustomobject]@{
-        ok = $true
-        configured = $true
-        isRepo = $true
-        stateOk = $stateOk
-        stateError = $stateError
-        headState = [string]$head.state
-        headCommit = [string]$head.commit
-        folderSelected = $true
-        selectedPath = $repoPath
-        folder = Get-FolderState -Path $repoPath -KnownIsRepo $true
-        repoPath = $repoPath
-        repoName = Split-Path -Leaf $repoPath
-        message = if ($stateOk) { "Repository ready" } else { "Repository state needs attention" }
-        branch = $branch
-        remote = $origin.display
-        remoteWebUrl = $origin.webUrl
-        remoteType = $origin.type
-        remoteValid = $origin.valid
-        tracking = $tracking
-        identity = Get-GitIdentity $repoPath
-        remoteSnapshot = $remoteSnapshot
-        changedFiles = @($changed)
-        files = @($filesSnapshot.files)
-        fileCount = $filesSnapshot.total
-        filesTruncated = $filesSnapshot.truncated
-        branches = $branches
-        remoteBranches = @($tracking.remoteBranchNames)
-        defaultBranch = [string]$tracking.remoteDefaultBranch
-        commits = @(Get-RecentCommits $repoPath)
-        operation = [string]$health.operation
-        busy = $script:AppState.Busy
-        localScannedAt = [string]$working.scannedAt
-        remoteFetchedAt = $script:AppState.RemoteFetchedAt
-        localStatusSignature = [string]$working.signature
-        timestamp = $now
     }
 }
 
@@ -1401,7 +1320,7 @@ function Get-AppSummary {
             stateOk = $true; stateError = ""; headState = "none"; headCommit = ""; branch = ""; remote = ""; remoteWebUrl = ""; remoteType = "none"; remoteValid = $false
             tracking = @{ hasUpstream = $false; upstream = ""; upstreamExists = $false; ahead = 0; behind = 0; mismatch = $false; relationship = "no-repository"; error = "" }
             identity = @{ configured = $false; name = ""; email = ""; inheritedAvailable = $false; inheritedName = ""; inheritedEmail = ""; source = "missing" }
-            remoteSnapshot = $emptySnapshot; changedFiles = @(); files = @(); fileCount = 0; filesTruncated = $false; branches = @(); remoteBranches = @(); defaultBranch = ""; commits = @(); operation = ""; busy = $script:AppState.Busy
+            remoteSnapshot = $emptySnapshot; changedFiles = @(); changedCount = 0; stagedCount = 0; unstagedCount = 0; conflictCount = 0; changesTruncated = $false; files = @(); fileCount = 0; filesTruncated = $false; branches = @(); remoteBranches = @(); defaultBranch = ""; commits = @(); operation = ""; busy = $script:AppState.Busy
             localScannedAt = ""; remoteFetchedAt = $script:AppState.RemoteFetchedAt; localStatusSignature = ""; revisions = $emptyRevisions; timestamp = $now
         }
     }
@@ -1484,6 +1403,16 @@ function Get-AppSummary {
         try { $remoteSnapshot = Get-RemoteSnapshot -RepoPath $repoPath -Tracking $tracking -HeadCommit ([string]$head.commit) }
         catch { $errors.Add($_.Exception.Message); $tracking.relationship = "error"; $tracking.error = $_.Exception.Message }
     }
+    $remoteSnapshotForSummary = [pscustomobject]@{
+        available = [bool]$remoteSnapshot.available
+        branch = [string]$remoteSnapshot.branch
+        files = @($remoteSnapshot.files | Select-Object -First 500)
+        fileCount = [int]$remoteSnapshot.fileCount
+        truncated = [bool]$remoteSnapshot.truncated
+        incomingFiles = @($remoteSnapshot.incomingFiles | Select-Object -First 500)
+        incomingCommits = @($remoteSnapshot.incomingCommits)
+        outgoingCommits = @($remoteSnapshot.outgoingCommits)
+    }
 
     $identity = [pscustomobject]@{ configured = $false; name = ""; email = ""; inheritedAvailable = $false; inheritedName = ""; inheritedEmail = ""; source = "missing" }
     try {
@@ -1503,15 +1432,30 @@ function Get-AppSummary {
 
     $localFilesKey = "$($revisions.repository)|local|$($working.signature)|$($head.commit)"
     $cachedFiles = Get-BranchlineCacheEntry -Name "local-files" -Key $localFilesKey
-    $files = if ($null -ne $cachedFiles -and $null -ne $cachedFiles.PSObject.Properties["items"]) { @($cachedFiles.items | Select-Object -First 500) } else { @($changed) }
+    $files = if ($null -ne $cachedFiles -and $null -ne $cachedFiles.PSObject.Properties["paths"]) {
+        @($cachedFiles.paths | Select-Object -First 500 | ForEach-Object {
+            $path = [string]$_
+            $status = if ($cachedFiles.statusMap.ContainsKey($path)) { $cachedFiles.statusMap[$path] } else { $null }
+            [pscustomobject]@{
+                path = $path
+                tracked = -not $cachedFiles.untracked.Contains($path)
+                status = if ($null -ne $status) { [string]$status.status } else { "" }
+                state = if ($null -ne $status) { [string]$status.state } else { "unchanged" }
+            }
+        })
+    } else { @($changed | Select-Object -First 500) }
     $fileCount = if ($null -ne $cachedFiles) { [int]$cachedFiles.total } else { @($changed).Count }
+    $changedCount = @($changed).Count
+    $stagedCount = @($changed | Where-Object { $_.state -in @("staged", "mixed") }).Count
+    $unstagedCount = @($changed | Where-Object { $_.state -in @("modified", "mixed", "untracked", "deleted", "conflicted") }).Count
+    $conflictCount = @($changed | Where-Object { $_.state -eq "conflicted" }).Count
     $stateOk = ($errors.Count -eq 0)
     $summary = [pscustomobject]@{
         ok = $true; configured = $true; isRepo = $true; stateOk = $stateOk; stateError = ($errors -join "`n")
         headState = [string]$head.state; headCommit = [string]$head.commit; folderSelected = $true; selectedPath = $repoPath; folder = Get-FolderState -Path $repoPath -KnownIsRepo $true
         repoPath = $repoPath; repoName = Split-Path -Leaf $repoPath; message = if ($stateOk) { "Repository ready" } else { "Repository state needs attention" }; branch = $branch
         remote = [string]$origin.display; remoteWebUrl = [string]$origin.webUrl; remoteType = [string]$origin.type; remoteValid = [bool]$origin.valid
-        tracking = $tracking; identity = $identity; remoteSnapshot = $remoteSnapshot; changedFiles = $changed; files = $files; fileCount = $fileCount; filesTruncated = ($fileCount -gt 500)
+        tracking = $tracking; identity = $identity; remoteSnapshot = $remoteSnapshotForSummary; changedFiles = @($changed | Select-Object -First 500); changedCount = $changedCount; stagedCount = $stagedCount; unstagedCount = $unstagedCount; conflictCount = $conflictCount; changesTruncated = ($changedCount -gt 500); files = $files; fileCount = $fileCount; filesTruncated = ($fileCount -gt 500)
         branches = $branches; remoteBranches = @($tracking.remoteBranchNames); defaultBranch = [string]$tracking.remoteDefaultBranch; commits = $commits; operation = [string]$health.operation; busy = $script:AppState.Busy
         localScannedAt = [string]$working.scannedAt; remoteFetchedAt = $script:AppState.RemoteFetchedAt; localStatusSignature = [string]$working.signature; revisions = $revisions; timestamp = $now
     }
@@ -1533,8 +1477,7 @@ function Invoke-AppAction {
         $script:AppState.CurrentAction = $action
         $stateIndependentActions = @(Get-StateIndependentActionNames)
         if (-not [string]::IsNullOrWhiteSpace($script:AppState.RepoPath) -and $action -notin $stateIndependentActions) {
-            $preflight = Get-WorkingTreeState $script:AppState.RepoPath -Force
-            if (-not $preflight.ok) { throw "Repository status is unavailable, so '$action' was blocked. Repair the Git repository and refresh before changing anything.`n$($preflight.error)" }
+            [void](Assert-RepositoryActionPreflight -RepoPath $script:AppState.RepoPath -Action $action)
         }
         switch ($action) {
             "selectRepository" {
@@ -1642,7 +1585,8 @@ function Invoke-AppAction {
                 if ((Get-PayloadString $Payload "confirm") -ne "CONNECT") { throw "Remote confirmation was missing." }
                 $parsed = ConvertTo-GitHubRemoteValue -Value (Get-PayloadString $Payload "remote") -AllowLocal:$script:AppState.AllowLocalTestRemote
                 if (-not $parsed.valid) { throw $parsed.message }
-                $previous = Invoke-GitCommand -WorkingDirectory $repo -Arguments @("remote", "get-url", "origin") -DisplayCommand "read origin" -TimeoutSeconds 10
+                $previous = Invoke-GitCommand -WorkingDirectory $repo -Arguments @("config", "--get", "remote.origin.url") -DisplayCommand "read origin" -TimeoutSeconds 10 -ReadOnly
+                if (-not $previous.ok -and $previous.code -ne 1) { throw "The existing origin could not be read safely.`n$($previous.output)" }
                 $hadOrigin = $previous.ok
                 $recoveryFile = Save-RemoteConfigurationRecovery $repo
                 $set = if ($hadOrigin) {
@@ -1653,36 +1597,57 @@ function Invoke-AppAction {
                 if (-not $set.ok) { return $set }
                 $fetch = Invoke-OriginFetch -RepoPath $repo -DisplayCommand "git fetch origin"
                 if (-not $fetch.ok) {
-                    if ($hadOrigin) {
-                        [void](Invoke-GitCommand -WorkingDirectory $repo -Arguments @("remote", "set-url", "origin", $previous.raw.Trim()) -DisplayCommand "restore previous origin" -TimeoutSeconds 15)
+                    $rollback = if ($hadOrigin) {
+                        Invoke-GitCommand -WorkingDirectory $repo -Arguments @("remote", "set-url", "origin", $previous.raw.Trim()) -DisplayCommand "restore previous origin" -TimeoutSeconds 15
                     } else {
-                        [void](Invoke-GitCommand -WorkingDirectory $repo -Arguments @("remote", "remove", "origin") -DisplayCommand "remove failed origin" -TimeoutSeconds 15)
+                        Invoke-GitCommand -WorkingDirectory $repo -Arguments @("remote", "remove", "origin") -DisplayCommand "remove failed origin" -TimeoutSeconds 15
                     }
-                    return New-AppResult -Ok $false -Code $fetch.code -Command "connect GitHub origin" -Output (Join-CommandOutput @($fetch.output, "The previous origin configuration was restored.")) -Phase "fetch" -Steps @(
+                    $rollbackMessage = if ($rollback.ok) {
+                        "The previous origin configuration was restored."
+                    } else {
+                        "Fetching failed and automatic origin rollback also failed. Use the recovery journal before changing the connection again: $recoveryFile"
+                    }
+                    return New-AppResult -Ok $false -Code $fetch.code -Command "connect GitHub origin" -Output (Join-CommandOutput @($fetch.output, $rollback.output, $rollbackMessage)) -Partial (-not $rollback.ok) -Phase $(if ($rollback.ok) { "fetch" } else { "rollback" }) -Steps @(
                         (New-ActionStep "Save previous connection" "completed" "write recovery journal" $recoveryFile),
                         (New-ActionStep "Set origin" "completed" $set.command $set.output),
                         (New-ActionStep "Fetch origin" "failed" $fetch.command $fetch.output),
-                        (New-ActionStep "Restore previous connection" "completed" "restore origin" "The prior origin was restored.")
-                    ) -Recovery @{ recoveryFile = $recoveryFile; previousOriginRestored = $true }
+                        (New-ActionStep "Restore previous connection" $(if ($rollback.ok) { "completed" } else { "failed" }) $rollback.command $rollback.output)
+                    ) -Recovery @{ recoveryFile = $recoveryFile; previousOriginRestored = [bool]$rollback.ok; nextAction = $(if ($rollback.ok) { "retry-or-choose-another-origin" } else { "restore-origin-from-journal" }) }
                 }
                 $originChanged = ($hadOrigin -and $previous.raw.Trim() -cne $parsed.gitUrl)
+                $upstreamSteps = New-Object System.Collections.Generic.List[object]
+                $upstreamFailures = New-Object System.Collections.Generic.List[string]
                 if ($originChanged) {
-                    $trackingBranches = Invoke-GitCommand -WorkingDirectory $repo -Arguments @("for-each-ref", "--format=%(refname:short)%09%(upstream:short)", "refs/heads") -DisplayCommand "inspect old upstreams" -TimeoutSeconds 15
-                    if ($trackingBranches.ok) {
+                    $trackingBranches = Invoke-GitCommand -WorkingDirectory $repo -Arguments @("for-each-ref", "--format=%(refname:short)%09%(upstream:short)", "refs/heads") -DisplayCommand "inspect old upstreams" -TimeoutSeconds 15 -ReadOnly
+                    if (-not $trackingBranches.ok) {
+                        $upstreamFailures.Add($trackingBranches.output)
+                        $upstreamSteps.Add((New-ActionStep "Inspect previous tracking" "failed" $trackingBranches.command $trackingBranches.output))
+                    } else {
                         foreach ($line in @($trackingBranches.raw -split '(?:\r\n|\n|\r)')) {
                             $parts = $line -split "`t", 2
                             if ($parts.Count -eq 2 -and $parts[1].StartsWith("origin/")) {
-                                [void](Invoke-GitCommand -WorkingDirectory $repo -Arguments @("branch", "--unset-upstream", $parts[0]) -DisplayCommand "clear stale upstream for $($parts[0])" -TimeoutSeconds 10)
+                                $clear = Invoke-GitCommand -WorkingDirectory $repo -Arguments @("branch", "--unset-upstream", $parts[0]) -DisplayCommand "clear stale upstream for $($parts[0])" -TimeoutSeconds 10
+                                $upstreamSteps.Add((New-ActionStep "Clear stale tracking for $($parts[0])" $(if ($clear.ok) { "completed" } else { "failed" }) $clear.command $clear.output))
+                                if (-not $clear.ok) { $upstreamFailures.Add($clear.output) }
                             }
                         }
                     }
                 }
-                $relationship = (Get-TrackingStatus -RepoPath $repo -Branch (Get-CurrentBranch $repo)).relationship
-                return New-AppResult -Ok $true -Command "connect GitHub origin" -Output (Join-CommandOutput @($set.output, $fetch.output, "Origin is ready for inspection: $($parsed.display)", "Previous connection recovery: $recoveryFile", "Relationship: $relationship")) -Data @{ relationship = $relationship; recoveryFile = $recoveryFile } -Phase "complete" -Steps @(
+                $relationship = "error"
+                try { $relationship = (Get-TrackingStatus -RepoPath $repo -Branch (Get-CurrentBranch $repo)).relationship }
+                catch {
+                    $upstreamFailures.Add($_.Exception.Message)
+                    $upstreamSteps.Add((New-ActionStep "Inspect new tracking relationship" "failed" "compare branch tracking" $_.Exception.Message))
+                }
+                $connectionSteps = @(
                     (New-ActionStep "Save previous connection" "completed" "write recovery journal" $recoveryFile),
                     (New-ActionStep "Set origin" "completed" $set.command $set.output),
                     (New-ActionStep "Fetch origin" "completed" $fetch.command $fetch.output)
-                ) -Recovery @{ recoveryFile = $recoveryFile }
+                ) + @($upstreamSteps.ToArray())
+                if ($upstreamFailures.Count -gt 0) {
+                    return New-AppResult -Ok $false -Code 1 -Command "connect GitHub origin" -Output (Join-CommandOutput @($set.output, $fetch.output, "The new origin was fetched, but old branch tracking could not be cleared completely.", ($upstreamFailures -join "`n"), "Recovery journal: $recoveryFile")) -Data @{ relationship = $relationship; recoveryFile = $recoveryFile } -Partial $true -Phase "tracking-cleanup" -Steps $connectionSteps -Recovery @{ recoveryFile = $recoveryFile; originConnected = $true; nextAction = "repair-upstream" }
+                }
+                return New-AppResult -Ok $true -Command "connect GitHub origin" -Output (Join-CommandOutput @($set.output, $fetch.output, "Origin is ready for inspection: $($parsed.display)", "Previous connection recovery: $recoveryFile", "Relationship: $relationship")) -Data @{ relationship = $relationship; recoveryFile = $recoveryFile } -Phase "complete" -Steps $connectionSteps -Recovery @{ recoveryFile = $recoveryFile }
             }
             "githubLogin" { return Start-GitHubLogin (Assert-RepositorySelected) }
             "githubResetLogin" {
@@ -1760,7 +1725,7 @@ function Invoke-AppAction {
                 $tracking = Get-TrackingStatus -RepoPath $repo -Branch $branch
                 if ($tracking.matchingRemoteExists) { throw "origin/$branch already exists. Use normal Publish instead." }
                 if ($tracking.relationship -notin @("unpublished", "remote-empty")) { throw "Branchline cannot safely create origin/$branch from the current relationship '$($tracking.relationship)'." }
-                return Invoke-PublishCurrentBranch $repo
+                return Invoke-PublishCurrentBranch -RepoPath $repo -PreparedFetch $fetch -PreparedTracking $tracking
             }
             "checkoutRemoteBranch" {
                 $repo = Assert-RepositorySelected
@@ -2344,6 +2309,23 @@ function Start-GitControlPanel {
         }
     }
     if ($null -eq $listener) { throw "Branchline could not find a free local port between $Port and $([Math]::Min(65535, $Port + 20))." }
+
+    # A named per-install mutex closes the small coordination gap where the
+    # runtime marker is missing and the existing single-threaded server is too
+    # busy to answer /api/about. Different installations keep different IDs
+    # and may still choose the next free port normally.
+    $instanceMutex = [System.Threading.Mutex]::new($false, "Local\Branchline-$($script:AppState.InstallId)")
+    $ownsInstanceMutex = $false
+    try { $ownsInstanceMutex = $instanceMutex.WaitOne(0) }
+    catch [System.Threading.AbandonedMutexException] { $ownsInstanceMutex = $true }
+    if (-not $ownsInstanceMutex) {
+        $listener.Stop()
+        $instanceMutex.Dispose()
+        Write-Host "Branchline $($script:AppState.Version) is already running or busy for this installation." -ForegroundColor Yellow
+        Write-Host "No duplicate instance was started."
+        return
+    }
+
     $script:AppState.Port = $selectedPort
     $activeStatePath = Join-Path $script:AppState.RuntimePath "active.json"
     try {
@@ -2421,6 +2403,10 @@ function Start-GitControlPanel {
             }
         }
         catch { }
+        if ($ownsInstanceMutex) {
+            try { $instanceMutex.ReleaseMutex() } catch { }
+        }
+        $instanceMutex.Dispose()
     }
 }
 

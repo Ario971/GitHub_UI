@@ -77,20 +77,40 @@ foreach ($candidatePort in $Port..([Math]::Min(65535, $Port + 20))) {
 }
 
 $verifiedPort = 0
+$processId = 0
 foreach ($candidatePort in $candidatePorts) {
     if ($null -ne (Get-VerifiedAbout $candidatePort)) { $verifiedPort = $candidatePort; break }
 }
 if ($verifiedPort -eq 0) {
-    Write-Host "This Branchline installation is not running." -ForegroundColor Yellow
-    Remove-Item -LiteralPath $activeStatePath -Force -ErrorAction SilentlyContinue
-    exit 0
+    $recordedProcessIsCurrent = Test-RecordedProcessStart -ProcessId $activeProcessId -RecordedStart $activeProcessStartedAtUtc
+    $recordedListener = if ($recordedProcessIsCurrent -and $activePort -gt 0) {
+        Get-NetTCPConnection -LocalAddress "127.0.0.1" -LocalPort $activePort -State Listen -ErrorAction SilentlyContinue |
+            Where-Object { [int]$_.OwningProcess -eq $activeProcessId } |
+            Select-Object -First 1
+    } else { $null }
+    if ($null -ne $recordedListener) {
+        # The single-threaded local server cannot answer /api/about while a long
+        # Git operation is in progress. The installation ID, PID start time,
+        # loopback listener, and owning PID together are the safe fallback.
+        $verifiedPort = $activePort
+        $processId = $activeProcessId
+        Write-Host "Branchline is busy and did not answer, but its recorded process and loopback port were verified." -ForegroundColor Yellow
+    }
+    elseif ($recordedProcessIsCurrent) {
+        Write-Warning "The recorded Branchline process is still alive, but its loopback listener could not be verified. Nothing was stopped and the runtime marker was preserved."
+        exit 1
+    }
+    else {
+        Write-Host "This Branchline installation is not running." -ForegroundColor Yellow
+        Remove-Item -LiteralPath $activeStatePath -Force -ErrorAction SilentlyContinue
+        exit 0
+    }
 }
 
-$processId = 0
-if ($verifiedPort -eq $activePort -and (Test-RecordedProcessStart -ProcessId $activeProcessId -RecordedStart $activeProcessStartedAtUtc)) {
+if ($processId -le 0 -and $verifiedPort -eq $activePort -and (Test-RecordedProcessStart -ProcessId $activeProcessId -RecordedStart $activeProcessStartedAtUtc)) {
     $processId = $activeProcessId
 }
-else {
+elseif ($processId -le 0) {
     $connection = Get-NetTCPConnection -LocalAddress "127.0.0.1" -LocalPort $verifiedPort -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($null -ne $connection) { $processId = [int]$connection.OwningProcess }
 }

@@ -74,6 +74,12 @@ try {
     Assert-True ($null -ne $summary.changedFiles -and @($summary.changedFiles).Count -eq 0) "keeps an empty working tree as an explicit empty array"
     $unknown = Invoke-AppAction ([pscustomobject]@{ action = "removedLegacyAction" })
     Assert-True (-not $unknown.ok -and $null -ne $unknown.steps -and -not [string]::IsNullOrWhiteSpace($unknown.phase)) "returns structured fields even for rejected actions"
+    $module = Get-Module GitControlPanel
+    $timedOutGit = & $module {
+        param([string]$Fixture)
+        Invoke-GitCommand -WorkingDirectory $Fixture -Arguments @("-c", "alias.branchline-delay=!sleep 20", "branchline-delay") -DisplayCommand "injected timeout fixture" -TimeoutSeconds 1
+    } $repository
+    Assert-True (-not $timedOutGit.ok -and $timedOutGit.code -eq 124 -and $timedOutGit.phase -eq "timeout" -and $timedOutGit.recovery.processStopped) "returns a bounded, structured timeout after stopping the Git process tree"
 
     $identityRepository = New-TestRepository "identity repository"
     [void](Invoke-TestGit $identityRepository @("config", "--local", "--unset-all", "user.name"))
@@ -122,12 +128,22 @@ try {
     [void](Invoke-TestGit $repository @("commit", "-m", "New branch work"))
     $publishedNew = Invoke-AppAction ([pscustomobject]@{ action = "publishNewBranch"; confirm = "PUBLISH_NEW_BRANCH:feature/new-github-branch" })
     Assert-True ($publishedNew.ok -and (Invoke-TestGit $remote @("show-ref", "--verify", "refs/heads/feature/new-github-branch")).Length -gt 0) "publishes a missing GitHub branch through its distinct action"
+    Assert-Equal 1 @($publishedNew.steps | Where-Object { $_.name -eq "Check GitHub" }).Count "fetches exactly once while publishing a new GitHub branch"
+    [System.IO.File]::WriteAllBytes((Join-Path $repository "remote-invalid-utf8.dat"), [byte[]](255, 254, 65, 66))
+    [void](Invoke-TestGit $repository @("add", "remote-invalid-utf8.dat"))
+    [void](Invoke-TestGit $repository @("commit", "-m", "Add invalid UTF-8 fixture"))
+    [void](Invoke-AppAction ([pscustomobject]@{ action = "push" }))
+    $remoteBinaryPreview = Invoke-AppAction ([pscustomobject]@{ action = "previewFile"; side = "github"; file = "remote-invalid-utf8.dat" })
+    Assert-True ($remoteBinaryPreview.ok -and $remoteBinaryPreview.preview.kind -eq "binary" -and [string]::IsNullOrEmpty($remoteBinaryPreview.preview.content)) "classifies fetched non-UTF-8 blobs as binary before decoding"
     [void](Invoke-AppAction ([pscustomobject]@{ action = "switchBranch"; branch = "main" }))
 
     Write-Host "`nRead-only file browsers"
     [System.IO.File]::WriteAllText((Join-Path $repository "unicodé file.txt"), "hello ünicode`nsecond line`n", (New-Object System.Text.UTF8Encoding($false)))
+    [void](Get-AppSummary)
     $localPage = Invoke-AppAction ([pscustomobject]@{ action = "listFiles"; side = "local"; query = "unicodé"; offset = 0; limit = 20 })
     Assert-True ($localPage.ok -and $localPage.page.total -eq 1 -and $localPage.page.items[0].path -eq "unicodé file.txt") "searches the lazy local file index with Unicode paths"
+    $summaryAfterIndex = Get-AppSummary
+    Assert-True ($summaryAfterIndex.fileCount -gt 1 -and @($summaryAfterIndex.files | Where-Object { $_.path -eq "README.md" }).Count -eq 1) "keeps full repository files visible after the lazy file index is cached"
     $textPreview = Invoke-AppAction ([pscustomobject]@{ action = "previewFile"; side = "local"; file = "unicodé file.txt" })
     Assert-True ($textPreview.ok -and $textPreview.preview.kind -eq "text" -and $textPreview.preview.content.Contains("ünicode")) "previews an untracked UTF-8 text file safely"
     [void](Invoke-AppAction ([pscustomobject]@{ action = "stageFile"; file = "unicodé file.txt" }))
@@ -171,6 +187,15 @@ try {
     Assert-True (-not $blockedMutation.ok -and -not (Test-Path -LiteralPath (Join-Path $gitDirectory "refs\heads\must-not-exist"))) "blocks every mutating action when status cannot be read"
     [System.IO.File]::WriteAllBytes($indexPath, $savedIndex)
     Assert-Equal $headBeforeBlockedAction (Invoke-TestGit $repository @("rev-parse", "HEAD")) "preserves HEAD while a corrupt index blocks mutation"
+
+    $largeStateRepository = New-TestRepository "large dirty repository"
+    for ($number = 1; $number -le 510; $number += 1) {
+        [System.IO.File]::WriteAllText((Join-Path $largeStateRepository ("dirty-{0:D4}.txt" -f $number)), "dirty $number`n", (New-Object System.Text.UTF8Encoding($false)))
+    }
+    [void](Invoke-AppAction ([pscustomobject]@{ action = "selectRepository"; path = $largeStateRepository }))
+    $largeStateSummary = Get-AppSummary
+    Assert-True ($largeStateSummary.changedCount -eq 510 -and @($largeStateSummary.changedFiles).Count -eq 500 -and $largeStateSummary.changesTruncated) "bounds large working-tree payloads while preserving exact aggregate counts"
+    [void](Invoke-AppAction ([pscustomobject]@{ action = "selectRepository"; path = $repository }))
 
     $targetCommit = Invoke-TestGit $repository @("rev-parse", "HEAD")
     $resetOne = Invoke-AppAction ([pscustomobject]@{ action = "resetToCommit"; commit = $targetCommit; confirm = "RESET:$targetCommit" })

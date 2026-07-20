@@ -48,7 +48,7 @@ try {
     Import-Module $modulePath -Force
 
     $repository = New-FixtureRepository "working repository"
-    Initialize-GitControlState -RepoPath $repository -Port 4848 -WebRoot $webRoot -ProjectRoot $projectRoot -InstallId ("b" * 32)
+    Initialize-GitControlState -RepoPath $repository -Port 4848 -WebRoot $webRoot -ProjectRoot $projectRoot -InstallId ("b" * 32) -AllowLocalTestRemote
     $clean = Get-AppSummary
     Assert-State ($clean.stateOk -and $clean.headState -eq "branch" -and $clean.branch -eq "main" -and @($clean.changedFiles).Count -eq 0) "reads a clean attached branch through porcelain v2"
     Assert-State (-not [string]::IsNullOrWhiteSpace([string]$clean.revisions.repository) -and -not [string]::IsNullOrWhiteSpace([string]$clean.revisions.head)) "returns opaque repository revisions"
@@ -93,6 +93,19 @@ try {
     $blocked = Invoke-AppAction ([pscustomobject]@{ action = "createBranch"; branch = "blocked-by-corrupt-index" })
     Assert-State (-not $blocked.ok -and -not (Test-Path -LiteralPath (Join-Path $gitDirectory "refs\heads\blocked-by-corrupt-index"))) "fresh action preflight ignores cached health and blocks a corrupt index"
     [System.IO.File]::WriteAllBytes($indexPath, $savedIndex)
+
+    $referenceRemote = Join-Path $testRoot "reference remote.git"
+    [System.IO.Directory]::CreateDirectory($referenceRemote) | Out-Null
+    [void](Invoke-FixtureGit $referenceRemote @("init", "--bare"))
+    [void](Invoke-FixtureGit $repository @("remote", "add", "origin", $referenceRemote))
+    [void](Invoke-FixtureGit $repository @("push", "-u", "origin", "main"))
+    $remoteReferencePath = Join-Path $gitDirectory "refs\remotes\origin\main"
+    $savedRemoteReference = [System.IO.File]::ReadAllBytes($remoteReferencePath)
+    [System.IO.File]::WriteAllText($remoteReferencePath, (("f" * 40) + "`n"), (New-Object System.Text.UTF8Encoding($false)))
+    $unreadableReferenceSummary = Get-AppSummary
+    $blockedByReference = Invoke-AppAction ([pscustomobject]@{ action = "createBranch"; branch = "blocked-by-unreadable-reference" })
+    Assert-State (-not $unreadableReferenceSummary.stateOk -and -not $blockedByReference.ok -and -not (Test-Path -LiteralPath (Join-Path $gitDirectory "refs\heads\blocked-by-unreadable-reference"))) "fails closed when a current tracking reference points to an unreadable object"
+    [System.IO.File]::WriteAllBytes($remoteReferencePath, $savedRemoteReference)
 
     [void](Invoke-FixtureGit $repository @("checkout", "--detach", "HEAD"))
     Start-Sleep -Milliseconds 2100
