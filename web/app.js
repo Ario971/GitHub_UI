@@ -1139,11 +1139,17 @@ function updateBranchControls() {
   const mergeTarget = elements.mergeTargetSelect.value || "";
   const changed = asArray(summary.changedFiles).length;
   const defaultBranch = String(summary.defaultBranch || "main");
+  const onSharedBase = Boolean(current && current === defaultBranch);
+  const branchPublished = Boolean(summary.tracking?.matchingRemoteExists);
   elements.currentBranchLabel.textContent = current || (summary.headState === "detached" ? `Detached at ${String(summary.headCommit || "").slice(0, 8)}` : "—");
   elements.branchSummary.textContent = summary.headState === "detached"
     ? "This commit has no branch name. Enter a new branch name below to preserve it before other work."
     : current
-      ? `Current branch: ${current}. New branches start from the current branch.`
+      ? onSharedBase
+        ? `${defaultBranch} is the shared base. Check GitHub and Pull first, then create a short-lived branch for the new task.`
+        : branchPublished
+          ? `Team branch ${current} is on GitHub. Commit and Publish your next logical change, then open a pull request into ${defaultBranch}.`
+          : `New local branch ${current} is ready. Commit the first logical change, then Publish it as a new GitHub branch.`
       : "Create the first commit before managing branches.";
   elements.switchBranchButton.textContent = destination ? `Switch to ${destination}` : "Choose a destination";
   elements.branchSwitchHelp.textContent = !destination
@@ -1160,15 +1166,17 @@ function updateBranchControls() {
       ? "Source and target must be different branches."
       : changed > 0
         ? `Merge is waiting: commit or restore all ${changed} local change${changed === 1 ? "" : "s"} first.`
-        : `Branchline will switch to ${mergeTarget}, then merge ${mergeSource} into it with a normal merge commit.`;
+        : `For team work, prefer Publish → Pull Request → review → merge on GitHub. If your team explicitly wants a local merge, Branchline will switch to ${mergeTarget} and merge ${mergeSource} into it normally.`;
 
   elements.pullRequestLink.classList.add("is-hidden");
   elements.pullRequestLink.removeAttribute("href");
+  elements.pullRequestLink.textContent = "04 Open pull request on GitHub ↗";
   if (summary.remoteWebUrl && current && current !== defaultBranch && summary.tracking?.matchingRemoteExists) {
     try {
       const base = new URL(summary.remoteWebUrl);
       if (base.protocol === "https:" && base.hostname === "github.com") {
         elements.pullRequestLink.href = `${base.href.replace(/\/$/, "")}/compare/${encodeURIComponent(defaultBranch)}...${encodeURIComponent(current)}?expand=1`;
+        elements.pullRequestLink.textContent = `04 Open pull request: ${current} → ${defaultBranch} ↗`;
         elements.pullRequestLink.classList.remove("is-hidden");
       }
     } catch { }
@@ -1528,7 +1536,20 @@ async function runActionLegacy(payload, busyMessage = "Running Git safely…") {
   try {
     const result = await api("/api/action", payload);
     appendActivity(result);
-    toast(result.partial ? "The commit succeeded; Publish still needs attention." : result.ok ? actionLabel(result.command) : firstLine(result.output), !result.ok);
+    const branch = String(state.summary?.branch || "");
+    const defaultBranch = String(state.summary?.defaultBranch || "main");
+    const publishedTeamBranch = result.ok
+      && ["push", "publishNewBranch", "commitStagedPush"].includes(payload.action)
+      && branch
+      && branch !== defaultBranch;
+    const resultMessage = result.partial
+      ? "The commit succeeded; Publish still needs attention."
+      : publishedTeamBranch
+        ? `Branch ${branch} is on GitHub. Next: open its pull request into ${defaultBranch}.`
+        : result.ok
+          ? actionLabel(result.command)
+          : firstLine(result.output);
+    toast(resultMessage, !result.ok);
     if (window.BranchlineActions.shouldClearCommitMessage(payload.action, result)) elements.commitMessageInput.value = "";
     if (result.ok && payload.action === "createBranch") elements.newBranchInput.value = "";
     const invalidation = window.BranchlineActions.invalidation(payload.action);
@@ -1821,6 +1842,23 @@ async function publishNewBranch() {
   await runAction({ action: "publishNewBranch", confirm: `PUBLISH_NEW_BRANCH:${branch}` }, `Publishing new GitHub branch ${branch}…`);
 }
 
+async function createTeamBranch() {
+  const branch = elements.newBranchInput.value.trim();
+  if (!branch) return toast("Enter a short branch name such as feature/clear-name.", true);
+  const summary = state.summary || {};
+  const current = String(summary.branch || "");
+  const defaultBranch = String(summary.defaultBranch || "main");
+  const relationship = String(summary.tracking?.relationship || "");
+  const hasLocalChanges = asArray(summary.changedFiles).length > 0;
+  if (current === defaultBranch && !hasLocalChanges && ["behind", "diverged"].includes(relationship)) {
+    setRepositoryView("github");
+    showSyncGuide("receive");
+    toast(`Update ${defaultBranch} from GitHub before creating ${branch}.`);
+    return;
+  }
+  await runAction({ action: "createBranch", branch }, `Creating team branch ${branch}…`);
+}
+
 async function checkoutRemoteBranch() {
   const branch = elements.remoteBranchSelect.value || "";
   if (!branch) return;
@@ -1961,7 +1999,7 @@ function installEvents() {
     await runAction({ action: "commitStagedPush", message, confirm: "COMMIT_STAGED_PUSH" }, "Committing staged work and publishing…");
   });
 
-  elements.createBranchButton.addEventListener("click", () => runAction({ action: "createBranch", branch: elements.newBranchInput.value.trim() }, "Creating branch…"));
+  elements.createBranchButton.addEventListener("click", createTeamBranch);
   elements.switchBranchButton.addEventListener("click", () => runAction({ action: "switchBranch", branch: currentBranch() }, "Switching branch…"));
   elements.branchSelect.addEventListener("change", () => { updateBranchControls(); updateAvailability(); });
   elements.mergeSourceSelect.addEventListener("change", () => { updateBranchControls(); updateAvailability(); });

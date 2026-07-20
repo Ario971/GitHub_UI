@@ -105,10 +105,28 @@ Branchline caches read-only identity, branch, history, snapshot, and file-index 
 
 The combined **Commit staged & publish** action asks before creating and publishing the commit. It never stages unrelated unstaged changes.
 
+## Recommended team workflow
+
+Keep the shared default branch clean. Start from an updated `main`, create a short-lived branch, make small logical commits, publish that branch, and open a pull request. Let teammates and CI review it, then merge the pull request on GitHub. Return to local `main` and Pull before starting the next task.
+
+```text
+Check GitHub + Pull main
+        ↓
+Create feature/short-name
+        ↓
+Stage → Commit → Publish
+        ↓
+Open pull request → review + CI → merge on GitHub
+        ↓
+Switch to main → Check GitHub → Pull
+```
+
+The local branch merge control remains available for repositories that explicitly use local merges, but it is presented as an advanced path rather than the default team route.
+
 ## Branch workflow
 
 - **Switch branch** lists only other local branches as destinations. Compatible uncommitted changes may travel with the switch; Git refuses the switch instead of overwriting files when they cannot be applied safely.
-- **Merge branches** has separate source and target selectors, so `feature → main` is unambiguous. Branchline requires a clean working tree, switches to the chosen target, then creates a normal merge commit from the source.
+- **Advanced local merge** has separate source and target selectors, so `feature → main` is unambiguous. Use it only when the repository's workflow calls for a local merge; teams should normally publish the feature branch and merge its reviewed pull request on GitHub.
 - **GitHub-only branches** can be checked out as a new local tracking branch when the working tree is clean.
 - **Repair branch tracking** is a confirmed pointer-only repair when the current branch should track `origin/<same-name>`. If that GitHub branch does not exist, Branchline offers the separate **Publish as a new GitHub branch** action.
 - If a merge conflicts, Branchline remains on the target branch, shows the conflicted files, and offers the existing safe abort action.

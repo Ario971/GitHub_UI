@@ -122,21 +122,28 @@ function Get-RepositoryFilePage {
         $index = Get-BranchlineCacheEntry -Name "local-files" -Key $indexKey
         if ($null -eq $index) {
             $statusMap = @{}
-            foreach ($file in @($working.files)) { $statusMap[[string]$file.path] = $file }
-            $listing = Invoke-GitCommand -WorkingDirectory $RepoPath -Arguments @("-c", "core.quotepath=false", "ls-files", "-t", "--cached", "--others", "--exclude-standard", "-z") -DisplayCommand "index local repository files" -TimeoutSeconds 30 -ReadOnly
+            $untrackedSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+            foreach ($file in @($working.files)) {
+                $path = [string]$file.path
+                $statusMap[$path] = $file
+                if (-not [bool]$file.tracked) { [void]$untrackedSet.Add($path) }
+            }
+            # The porcelain-v2 status scan already enumerated every untracked
+            # path. Asking ls-files for --others would walk the whole working
+            # tree a second time, which is especially expensive on Windows and
+            # under real-time antivirus scanning. Read the index only, then add
+            # the untracked paths from that authoritative status snapshot.
+            $listing = Invoke-GitCommand -WorkingDirectory $RepoPath -Arguments @("-c", "core.quotepath=false", "ls-files", "--cached", "-z") -DisplayCommand "index tracked repository files" -TimeoutSeconds 30 -ReadOnly
             if (-not $listing.ok) { throw "Branchline could not list local repository files.`n$($listing.output)" }
             $seen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-            $untrackedSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
             $pathsList = New-Object System.Collections.Generic.List[string]
             [int64]$estimatedBytes = 4096
             foreach ($recordValue in @(Get-NulItems $listing.raw)) {
-                $record = [string]$recordValue
-                if ($record.Length -lt 3 -or $record[1] -ne ' ') { continue }
-                $path = $record.Substring(2).Replace('\', '/')
+                $path = ([string]$recordValue).Replace('\', '/')
+                if ([string]::IsNullOrWhiteSpace($path)) { continue }
                 if (-not $seen.Add($path)) { continue }
                 $pathsList.Add($path)
                 $estimatedBytes += ([int64]$path.Length * 2 + 48)
-                if ($record[0] -eq '?') { [void]$untrackedSet.Add($path) }
             }
             foreach ($file in @($working.files)) {
                 $path = [string]$file.path

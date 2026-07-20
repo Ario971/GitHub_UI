@@ -2372,7 +2372,11 @@ function Start-GitControlPanel {
                     catch { Write-Verbose "The runtime marker could not be refreshed: $($_.Exception.Message)" }
                     $script:AppState.RuntimeStateCheckedAt = [DateTime]::UtcNow
                 }
-                Start-Sleep -Milliseconds 100
+                # Keep Ctrl+C observable without making every browser request
+                # wait behind a coarse 100 ms accept interval. Twenty-five
+                # milliseconds remains effectively idle while making local UI
+                # actions and incremental refreshes feel immediate.
+                Start-Sleep -Milliseconds 25
             }
             $client = $listener.AcceptTcpClient()
             try {

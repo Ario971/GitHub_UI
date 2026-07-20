@@ -165,6 +165,25 @@ test("uses cached tabs and has no permanent GPU-heavy effects", async ({ page })
   expect(effects.bridgeAnimation).toBe("none");
 });
 
+test("presents the standard team branch flow before advanced local merging", async ({ page }) => {
+  await expect(page.locator(".team-branch-route")).toContainText("Update main");
+  await expect(page.locator(".team-branch-route")).toContainText("pull request");
+  await expect(page.locator(".new-branch-heading")).toContainText("Start a new team task");
+  await expect(page.locator(".merge-workflow")).toContainText("Advanced: merge branches locally");
+  const verticalOrder = await page.locator(".branch-panel").evaluate((panel) => {
+    const top = (selector) => panel.querySelector(selector).getBoundingClientRect().top;
+    return {
+      create: top(".new-branch-heading"),
+      switch: top(".switch-workflow"),
+      remote: top(".remote-branch-workflow"),
+      merge: top(".merge-workflow")
+    };
+  });
+  expect(verticalOrder.create).toBeLessThan(verticalOrder.switch);
+  expect(verticalOrder.switch).toBeLessThan(verticalOrder.remote);
+  expect(verticalOrder.remote).toBeLessThan(verticalOrder.merge);
+});
+
 test("colors Git additions and removals and keeps journal entries separate", async ({ page }) => {
   const readme = path.join(repository, "README.md");
   const original = fs.readFileSync(readme, "utf8");
@@ -222,4 +241,26 @@ test("staging refreshes local state without rebuilding the full summary", async 
     spawnSync("git.exe", ["-C", repository, "reset", "--", "fast-stage.txt"], { encoding: "utf8" });
     if (fs.existsSync(file)) fs.rmSync(file, { force: true });
   }
+});
+
+test("guides a clean stale main through GitHub before creating a team branch", async ({ page }) => {
+  const updater = path.join(fixtureRoot, "teammate update");
+  run("git.exe", ["clone", "--branch", "main", remote, updater]);
+  git(updater, "config", "user.name", "Branchline Teammate");
+  git(updater, "config", "user.email", "teammate@example.invalid");
+  fs.writeFileSync(path.join(updater, "team-update.txt"), "incoming team work\n", "utf8");
+  git(updater, "add", "team-update.txt");
+  git(updater, "commit", "-m", "Add teammate update");
+  git(updater, "push", "origin", "main");
+  fs.rmSync(updater, { recursive: true, force: true });
+
+  await page.locator("#githubViewTab").click();
+  await page.locator("#fetchButton").click();
+  await expect(page.locator("#behindCount")).toHaveText("1");
+  await page.locator("#newBranchInput").fill("feature/from-fresh-main");
+  await page.locator("#createBranchButton").click();
+  await expect(page.locator("#syncGuideDialog")).toBeVisible();
+  await expect(page.locator("#currentBranchLabel")).toHaveText("main");
+  await expect(page.locator("#newBranchInput")).toHaveValue("feature/from-fresh-main");
+  await expect(page.locator("#toastRegion")).toContainText("Update main from GitHub");
 });

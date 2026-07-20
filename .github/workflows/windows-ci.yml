@@ -31,19 +31,19 @@ jobs:
         run: npm run test:syntax
 
       - name: PowerShell and backend regression tests
-        shell: powershell
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -File {0}
         run: .\tests\run-tests.ps1
 
       - name: Stabilization and failure-injection tests
-        shell: powershell
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -File {0}
         run: .\tests\stabilization-tests.ps1
 
       - name: Repository-state and cache parity tests
-        shell: powershell
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -File {0}
         run: .\tests\state-cache-tests.ps1
 
       - name: Lightweight local-status performance test
-        shell: powershell
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -File {0}
         run: .\tests\performance-tests.ps1
 
       - name: Browser and accessibility tests

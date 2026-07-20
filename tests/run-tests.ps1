@@ -150,6 +150,8 @@ try {
     Assert-Equal 1 $manifest.protocolVersion "declares protocol version one"
     $runFileText = Get-Content -Raw -LiteralPath (Join-Path $projectRoot "RUN-BRANCHLINE.cmd")
     Assert-True (-not $runFileText.Contains("pause")) "does not leave a batch pause after Ctrl+C"
+    $workflowText = Get-Content -Raw -LiteralPath (Join-Path $projectRoot ".github\workflows\windows-ci.yml") -Encoding UTF8
+    Assert-True (([regex]::Matches($workflowText, 'shell: powershell -NoProfile -ExecutionPolicy Bypass -File \{0\}')).Count -eq 4) "runs PowerShell CI scripts with File semantics so intentional native failures cannot leak through LASTEXITCODE"
 
     Write-Host "`nState-driven interface"
     $indexText = Get-Content -Raw -LiteralPath (Join-Path $webRoot "index.html") -Encoding UTF8
@@ -169,6 +171,8 @@ try {
     Assert-True ($indexText.Contains('Refresh GitHub snapshot only') -and $appText.Contains('never changes local project files')) "explains that Check GitHub fetches without changing local files"
     Assert-True ($appText.Contains('action: "integrateRemote"') -and $moduleText.Contains('function Invoke-IntegrateRemoteBranch')) "offers an explicit safe integration path when both sides have commits"
     Assert-True ($indexText.Contains('id="mergeSourceSelect"') -and $indexText.Contains('id="mergeTargetSelect"') -and $appText.Contains('action: "mergeBranches"')) "separates branch switching from an explicit source-to-target merge plan"
+    Assert-True ($indexText.Contains('Recommended team route') -and $indexText.Contains('Start a new team task') -and $indexText.Contains('Advanced: merge branches locally')) "places the pull-request team flow before advanced local merging"
+    Assert-True ($appText.Contains('async function createTeamBranch') -and $appText.Contains('["behind", "diverged"].includes(relationship)') -and $appText.Contains('showSyncGuide("receive")')) "guides a clean stale main through GitHub integration before creating a team branch"
     Assert-True ($indexText.Contains('id="refreshLocalButton"') -and $appText.Contains('refreshLocalFiles') -and $appText.Contains('/api/local-status') -and $appText.Contains('60000') -and -not $appText.Contains('setInterval')) "provides manual and adaptive lightweight local refresh without fetching GitHub"
     Assert-True ($indexText.Contains('Commit staged &amp; publish') -and $appText.Contains('action: "commitStagedPush"') -and $moduleText.Contains('"commitStagedPush"')) "lets already-staged work continue directly to commit and publish"
     Assert-True ($indexText.Contains('id="syncGuideDialog"') -and $indexText.Contains('id="syncGuideSteps"') -and $appText.Contains('function showSyncGuide')) "provides a state-aware synchronization guide box"

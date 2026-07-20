@@ -231,6 +231,18 @@ If you do not want to continue the merge, use Branchline's confirmed **Abort ope
 
 ## 12. Work with branches
 
+### Recommended team route
+
+Do not normally work directly on shared `main`. First update `main`, then create a branch for one task:
+
+1. Switch to `main`.
+2. Open **On GitHub**, click **Check GitHub**, then **Pull** if work is incoming.
+3. Create a branch such as `feature/better-guide`.
+4. Work in small logical steps: **Stage → Commit → Publish**.
+5. Click **Open pull request on GitHub**.
+6. Wait for review and CI, then merge the pull request on GitHub.
+7. Switch back to `main`, use **Check GitHub → Pull**, and start the next task from the updated branch.
+
 ### Create a branch
 
 1. Enter a clear name, such as `feature/better-guide`.
@@ -248,7 +260,9 @@ Git blocks the switch if it would overwrite incompatible uncommitted files.
 
 If the local branch does not exist on GitHub, choose **Publish as a new GitHub branch**. This also sets the correct tracking relationship.
 
-### Merge a feature into main
+### Advanced: merge a feature locally
+
+For normal teamwork, publish the feature branch and merge its reviewed pull request on GitHub. Use the local merge control only when your team explicitly wants a local merge.
 
 Choose the source and target explicitly:
 

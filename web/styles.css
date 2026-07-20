@@ -1148,6 +1148,43 @@ summary {
 .current-branch-card span { color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; }
 .current-branch-card strong { color: var(--forest); font-family: var(--font-mono); font-size: 12px; }
 
+.team-branch-route {
+  order: 1;
+  display: grid;
+  gap: 7px;
+  padding: 13px 14px;
+  border: 1px solid color-mix(in srgb, var(--success) 40%, var(--line));
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--success) 7%, var(--paper));
+}
+.team-branch-route span,
+.team-branch-route strong,
+.team-branch-route small { display: block; }
+.team-branch-route span {
+  color: var(--forest);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 850;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.team-branch-route strong { margin-top: 4px; font-size: 11px; line-height: 1.5; }
+.team-branch-route small { color: var(--muted); font-size: 10px; line-height: 1.5; }
+
+.new-branch-heading,
+.branch-panel #branchSummary,
+.new-branch-label,
+.new-branch-form { order: 2; }
+.switch-workflow { order: 3; }
+.remote-branch-workflow { order: 4; }
+.branch-panel #pullRequestLink { order: 5; }
+.merge-workflow {
+  order: 6;
+  border-style: dashed;
+  background: color-mix(in srgb, var(--mustard) 5%, var(--paper));
+}
+.branch-panel #deleteBranchButton { order: 7; }
+
 .branch-workflow {
   display: grid;
   gap: 8px;

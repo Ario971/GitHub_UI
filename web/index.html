@@ -316,8 +316,16 @@
             <strong id="currentBranchLabel">—</strong>
           </div>
 
-          <div class="branch-workflow">
-            <div class="branch-workflow-heading"><span>01</span><strong>Switch branch</strong></div>
+          <div class="team-branch-route" aria-label="Recommended team workflow">
+            <div>
+              <span>Recommended team route</span>
+              <strong>Update main → create branch → commit → publish → pull request</strong>
+            </div>
+            <small>Keep shared main clean. Let review and CI approve the branch before merging it on GitHub.</small>
+          </div>
+
+          <div class="branch-workflow switch-workflow">
+            <div class="branch-workflow-heading"><span>02</span><strong>Continue another local branch</strong></div>
             <label for="branchSelect">Destination branch</label>
             <select id="branchSelect"></select>
             <p id="branchSwitchHelp" class="branch-summary">Choose another local branch.</p>
@@ -325,7 +333,7 @@
           </div>
 
           <div class="branch-workflow merge-workflow">
-            <div class="branch-workflow-heading"><span>02</span><strong>Merge branches</strong></div>
+            <div class="branch-workflow-heading"><span>ADV</span><strong>Advanced: merge branches locally</strong></div>
             <div class="merge-route" aria-label="Merge source and target">
               <label>Source branch<select id="mergeSourceSelect"></select></label>
               <span class="merge-arrow" aria-hidden="true">→</span>
@@ -335,20 +343,21 @@
             <button id="mergeBranchButton" class="button button-quiet button-wide" type="button" data-operation>Choose a merge route</button>
           </div>
 
+          <div class="branch-workflow-heading new-branch-heading"><span>01</span><strong>Start a new team task</strong></div>
           <p id="branchSummary" class="branch-summary">Choose a repository to manage its branches.</p>
-          <label for="newBranchInput">New branch</label>
-          <div class="inline-form">
+          <label class="new-branch-label" for="newBranchInput">New branch</label>
+          <div class="inline-form new-branch-form">
             <input id="newBranchInput" type="text" autocomplete="off" spellcheck="false" placeholder="feature/clear-name">
             <button id="createBranchButton" class="button button-ink" type="button" data-operation>Create</button>
           </div>
           <button id="deleteBranchButton" class="text-button danger-text" type="button" data-operation>Delete selected destination branch</button>
           <div class="branch-workflow remote-branch-workflow">
-            <div class="branch-workflow-heading"><span>03</span><strong>Bring down a GitHub branch</strong></div>
+            <div class="branch-workflow-heading"><span>03</span><strong>Continue a teammate's GitHub branch</strong></div>
             <label for="remoteBranchSelect">GitHub-only branch</label>
             <select id="remoteBranchSelect"></select>
             <button id="checkoutRemoteBranchButton" class="button button-quiet button-wide" type="button" data-operation>Create local branch &amp; switch</button>
           </div>
-          <a id="pullRequestLink" class="button button-quiet button-wide is-hidden" target="_blank" rel="noreferrer noopener">Open pull request on GitHub ↗</a>
+          <a id="pullRequestLink" class="button button-primary button-wide is-hidden" target="_blank" rel="noreferrer noopener">04 Open pull request on GitHub ↗</a>
         </section>
 
         <section class="panel history-panel" aria-labelledby="historyHeading">
