@@ -132,3 +132,9 @@ finally {
         }
     }
 }
+
+# Windows PowerShell 5.1 can otherwise return the exit code from the last
+# intentionally failing native Git command even though every assertion passed.
+# A thrown PowerShell error never reaches this line, so real failures still
+# leave the test process non-zero.
+exit 0

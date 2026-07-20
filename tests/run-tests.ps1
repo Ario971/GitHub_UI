@@ -152,6 +152,7 @@ try {
     Assert-True (-not $runFileText.Contains("pause")) "does not leave a batch pause after Ctrl+C"
     $workflowText = Get-Content -Raw -LiteralPath (Join-Path $projectRoot ".github\workflows\windows-ci.yml") -Encoding UTF8
     Assert-True (([regex]::Matches($workflowText, 'shell: powershell -NoProfile -ExecutionPolicy Bypass -File \{0\}')).Count -eq 4) "runs PowerShell CI scripts with File semantics so intentional native failures cannot leak through LASTEXITCODE"
+    Assert-True ((Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot 'state-cache-tests.ps1')) -match '(?m)^exit 0\s*$') "state-cache parity tests explicitly report success after intentional native failures"
 
     Write-Host "`nState-driven interface"
     $indexText = Get-Content -Raw -LiteralPath (Join-Path $webRoot "index.html") -Encoding UTF8

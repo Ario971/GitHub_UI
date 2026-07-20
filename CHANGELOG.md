@@ -29,6 +29,7 @@ All notable Branchline changes are recorded here. The project follows semantic v
 - Large persistent blur effects and continuous status animations were removed while preserving Branchline's visual design.
 - Runtime markers self-heal and include process start time so launcher reuse and STOP cannot confuse a recycled PID with Branchline.
 - Windows CI invokes PowerShell tests with `-File` semantics so an intentionally captured native failure cannot falsely fail a successful test script.
+- Repository-state parity tests now return an explicit successful process code after their intentional conflict fixture, matching Windows PowerShell 5.1 behavior on hosted runners.
 - Local file browsing reuses the complete porcelain status snapshot for untracked paths instead of scanning the working tree twice.
 - The branch panel now presents the standard team sequence before advanced local merging and guides a clean stale `main` through GitHub integration before branch creation.
 - The interruptible local server accept interval was reduced without adding network polling, improving UI response latency while preserving low idle activity.
