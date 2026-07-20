@@ -1,15 +1,18 @@
-# Local personal settings
-config.json
-start.ps1
+# Local runtime state
+.runtime/
+*.log
+*.tmp
 
 # Windows
 Thumbs.db
 Desktop.ini
 
-# Editor
+# Editors
 .vscode/
 .idea/
 
-# Temporary files
-*.tmp
-*.log
+# Test output
+.test-output/
+node_modules/
+playwright-report/
+test-results/

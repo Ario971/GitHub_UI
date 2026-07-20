@@ -1,0 +1,15 @@
+{
+  "name": "branchline-git-workbench",
+  "version": "0.9.0-beta",
+  "private": true,
+  "description": "Development-only browser and accessibility checks for the dependency-free Branchline Windows runtime.",
+  "scripts": {
+    "test:syntax": "node --check web/branchline-api.js && node --check web/branchline-state.js && node --check web/branchline-render.js && node --check web/branchline-actions.js && node --check web/branchline-a11y.js && node --check web/app.js",
+    "test:e2e": "playwright test",
+    "test:e2e:headed": "playwright test --headed"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "^4.10.2",
+    "@playwright/test": "^1.53.2"
+  }
+}
