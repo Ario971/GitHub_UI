@@ -7,9 +7,12 @@ Set-StrictMode -Version 2.0
 $script:Passed = 0
 $script:ServerProcess = $null
 $script:OriginalLocalAppData = $env:LOCALAPPDATA
+$script:OriginalSkipLegacyMigration = $env:BRANCHLINE_SKIP_LEGACY_RUNTIME_MIGRATION
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $modulePath = Join-Path $projectRoot "src\GitControlPanel.psm1"
 $webRoot = Join-Path $projectRoot "web"
+$runtimeHelperPath = Join-Path $projectRoot "src\private\RuntimeState.ps1"
+. $runtimeHelperPath
 $temporaryBase = [System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath()).TrimEnd('\')
 $testRoot = Join-Path $temporaryBase ("Branchline-tests-" + [Guid]::NewGuid().ToString("N"))
 
@@ -122,6 +125,7 @@ function Start-TestServer {
 try {
     Write-Host "Branchline regression and security tests" -ForegroundColor Cyan
     [void](New-Item -ItemType Directory -Path $testRoot)
+    $env:BRANCHLINE_SKIP_LEGACY_RUNTIME_MIGRATION = "1"
     $env:LOCALAPPDATA = Join-Path $testRoot "state"
     $repository = Join-Path $testRoot "working repository"
     $remote = Join-Path $testRoot "remote repository.git"
@@ -146,10 +150,13 @@ try {
     Assert-True (Test-Path -LiteralPath (Join-Path $projectRoot "STOP-BRANCHLINE.cmd") -PathType Leaf) "includes a one-click stop file"
     Assert-True (Test-Path -LiteralPath (Join-Path $projectRoot "stop.ps1") -PathType Leaf) "includes a verified stop implementation"
     $manifest = Get-Content -Raw -LiteralPath (Join-Path $projectRoot "app.manifest.json") -Encoding UTF8 | ConvertFrom-Json
-    Assert-Equal "0.9.0-beta" $manifest.version "declares the beta application version"
+    Assert-Equal "0.9.1-beta" $manifest.version "declares the beta application version"
     Assert-Equal 1 $manifest.protocolVersion "declares protocol version one"
     $runFileText = Get-Content -Raw -LiteralPath (Join-Path $projectRoot "RUN-BRANCHLINE.cmd")
     Assert-True (-not $runFileText.Contains("pause")) "does not leave a batch pause after Ctrl+C"
+    $expectedRuntimePath = Get-BranchlineRuntimePath -ProjectRoot $projectRoot -LocalAppDataPath (Join-Path $testRoot "state")
+    Assert-True ($expectedRuntimePath.StartsWith((Join-Path $testRoot "state\Branchline\runtime"), [System.StringComparison]::OrdinalIgnoreCase)) "keeps writable runtime state in Local AppData instead of the installation folder"
+    Assert-True (-not $expectedRuntimePath.StartsWith(($projectRoot.TrimEnd('\') + '\'), [System.StringComparison]::OrdinalIgnoreCase)) "allows Branchline to run from a read-only installation location"
     $workflowText = Get-Content -Raw -LiteralPath (Join-Path $projectRoot ".github\workflows\windows-ci.yml") -Encoding UTF8
     Assert-True (([regex]::Matches($workflowText, 'shell: powershell -NoProfile -ExecutionPolicy Bypass -File \{0\}')).Count -eq 4) "runs PowerShell CI scripts with File semantics so intentional native failures cannot leak through LASTEXITCODE"
     Assert-True ((Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot 'state-cache-tests.ps1')) -match '(?m)^exit 0\s*$') "state-cache parity tests explicitly report success after intentional native failures"
@@ -509,8 +516,9 @@ try {
     Assert-Equal 200 $aboutResponse.Status "serves installation coordination metadata without a session token"
     $about = $aboutResponse.Body | ConvertFrom-Json
     Assert-Equal "branchline" $about.appId "identifies Branchline at the about endpoint"
-    Assert-Equal "0.9.0-beta" $about.version "reports the running version at the about endpoint"
+    Assert-Equal "0.9.1-beta" $about.version "reports the running version at the about endpoint"
     Assert-Equal "appId,version,protocolVersion,installId" (($about.PSObject.Properties.Name) -join ",") "keeps the about endpoint free of repository paths and session tokens"
+    $env:LOCALAPPDATA = Join-Path $testRoot "server-state"
     $duplicateOutput = (& { Start-GitControlPanel -RepoPath $repository -Port $port -WebRoot $webRoot -NoBrowser -AllowLocalTestRemote } 6>&1 | Out-String)
     Assert-True ($duplicateOutput.Contains("already running")) "reuses an existing Branchline session instead of failing on its port"
     $unauthorized = Invoke-TestRequest "$baseUrl/api/summary"
@@ -527,7 +535,7 @@ try {
     Assert-Equal 405 $preflight.Status "rejects cross-origin preflight requests"
     Assert-True (-not $preflight.Headers.ContainsKey("Access-Control-Allow-Origin")) "omits CORS headers from live responses"
 
-    $runtimeMarker = Join-Path $projectRoot ".runtime\active.json"
+    $runtimeMarker = Join-Path (Get-BranchlineRuntimePath -ProjectRoot $projectRoot -LocalAppDataPath (Join-Path $testRoot "server-state")) "active.json"
     $coordinationClient = New-Object System.Net.Sockets.TcpClient
     try {
         $coordinationClient.Connect("127.0.0.1", $port)
@@ -568,6 +576,7 @@ finally {
         $script:ServerProcess.Dispose()
     }
     $env:LOCALAPPDATA = $script:OriginalLocalAppData
+    $env:BRANCHLINE_SKIP_LEGACY_RUNTIME_MIGRATION = $script:OriginalSkipLegacyMigration
     if (Test-Path -LiteralPath $testRoot -PathType Container) {
         $resolvedTestRoot = [System.IO.Path]::GetFullPath((Resolve-Path -LiteralPath $testRoot).Path).TrimEnd('\')
         $expectedPrefix = $temporaryBase + '\Branchline-tests-'

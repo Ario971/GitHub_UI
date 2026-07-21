@@ -37,6 +37,10 @@ $script:AppState = [ordered]@{
     AllowLocalTestRemote = $false
 }
 
+$runtimeStatePath = Join-Path $PSScriptRoot "private\RuntimeState.ps1"
+if (-not (Test-Path -LiteralPath $runtimeStatePath -PathType Leaf)) { throw "Branchline runtime-state helpers are missing." }
+. $runtimeStatePath
+
 $repositoryActionsPath = Join-Path $PSScriptRoot "private\RepositoryActions.ps1"
 if (-not (Test-Path -LiteralPath $repositoryActionsPath -PathType Leaf)) { throw "Branchline action helpers are missing." }
 . $repositoryActionsPath
@@ -2155,8 +2159,7 @@ function Initialize-GitControlState {
     if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) { throw "Application manifest is missing." }
     $manifest = Get-Content -Raw -LiteralPath $manifestPath -Encoding UTF8 | ConvertFrom-Json
     if ([string]$manifest.appId -cne "branchline" -or [string]::IsNullOrWhiteSpace([string]$manifest.version)) { throw "Application manifest is invalid." }
-    $runtimePath = Join-Path $resolvedProjectRoot ".runtime"
-    [System.IO.Directory]::CreateDirectory($runtimePath) | Out-Null
+    $runtimePath = Initialize-BranchlineRuntimePath -ProjectRoot $resolvedProjectRoot
     $installIdPath = Join-Path $runtimePath "install-id"
     if ([string]::IsNullOrWhiteSpace($InstallId)) {
         if (Test-Path -LiteralPath $installIdPath -PathType Leaf) { $InstallId = ([System.IO.File]::ReadAllText($installIdPath)).Trim() }

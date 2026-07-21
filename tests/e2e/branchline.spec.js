@@ -74,7 +74,11 @@ test.beforeAll(async () => {
     "-RepoPath", repository, "-Port", String(port), "-NoBrowser", "-AllowLocalTestRemote"
   ], {
     cwd: projectRoot,
-    env: { ...process.env, LOCALAPPDATA: path.join(fixtureRoot, "local-state") },
+    env: {
+      ...process.env,
+      LOCALAPPDATA: path.join(fixtureRoot, "local-state"),
+      BRANCHLINE_SKIP_LEGACY_RUNTIME_MIGRATION: "1"
+    },
     windowsHide: true,
     stdio: ["ignore", "pipe", "pipe"]
   });
@@ -86,6 +90,11 @@ test.afterAll(async () => {
     spawnSync(powershell, ["-NoLogo", "-NoProfile", "-ExecutionPolicy", "RemoteSigned", "-File", path.join(projectRoot, "stop.ps1"), "-Port", String(port)], {
       cwd: projectRoot,
       encoding: "utf8",
+      env: {
+        ...process.env,
+        LOCALAPPDATA: path.join(fixtureRoot, "local-state"),
+        BRANCHLINE_SKIP_LEGACY_RUNTIME_MIGRATION: "1"
+      },
       timeout: 15_000,
       windowsHide: true
     });

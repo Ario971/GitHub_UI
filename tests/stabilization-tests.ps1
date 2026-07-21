@@ -54,7 +54,7 @@ function New-TestRepository {
 }
 
 try {
-    Write-Host "Branchline 0.9.0-beta stabilization tests" -ForegroundColor Cyan
+    Write-Host "Branchline 0.9.1-beta stabilization tests" -ForegroundColor Cyan
     [System.IO.Directory]::CreateDirectory($testRoot) | Out-Null
     $env:LOCALAPPDATA = Join-Path $testRoot "state"
     Import-Module $modulePath -Force

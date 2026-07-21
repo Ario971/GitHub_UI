@@ -2,6 +2,13 @@
 
 All notable Branchline changes are recorded here. The project follows semantic versioning once a stable `1.0.0` release is reached.
 
+## 0.9.1-beta - 2026-07-21
+
+### Fixed
+
+- Runtime coordination state now lives under `%LOCALAPPDATA%\Branchline\runtime`, allowing Branchline to start from user-selected read-only or managed installation folders such as `C:\Projects`.
+- RUN and STOP derive the same opaque per-installation runtime directory, and existing installation-local `.runtime` identity is migrated safely during upgrade.
+
 ## 0.9.0-beta - 2026-07-17
 
 ### Added
