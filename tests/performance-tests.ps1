@@ -5,11 +5,15 @@ $ErrorActionPreference = "Stop"
 Set-StrictMode -Version 2.0
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
+$runtimeHelperPath = Join-Path $projectRoot "src\private\RuntimeState.ps1"
+. $runtimeHelperPath
 $temporaryBase = [System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath()).TrimEnd('\')
 $testRoot = Join-Path $temporaryBase ("Branchline-performance-" + [Guid]::NewGuid().ToString("N"))
 $repository = Join-Path $testRoot "five-thousand-files"
 $serverProcess = $null
 $port = 0
+$originalLocalAppData = $env:LOCALAPPDATA
+$originalSkipLegacyMigration = $env:BRANCHLINE_SKIP_LEGACY_RUNTIME_MIGRATION
 
 function Invoke-TestGit {
     param([string]$WorkingDirectory, [string[]]$Arguments)
@@ -64,6 +68,8 @@ function Invoke-TestJsonRequest {
 
 try {
     Write-Host "Branchline lightweight local-status performance test" -ForegroundColor Cyan
+    $env:BRANCHLINE_SKIP_LEGACY_RUNTIME_MIGRATION = "1"
+    $env:LOCALAPPDATA = Join-Path $testRoot "state"
     [System.IO.Directory]::CreateDirectory($repository) | Out-Null
     Invoke-TestGit $repository @("init", "-b", "main")
     Invoke-TestGit $repository @("config", "user.name", "Branchline Performance Test")
@@ -166,7 +172,7 @@ try {
     if ($growth -gt 32MB) { throw "Repeated cached summaries grew server memory by more than 32 MiB." }
     Write-Host "  PASS  100 cached summaries stayed within the memory-growth limit" -ForegroundColor Green
 
-    $runtimeState = Join-Path $projectRoot ".runtime\active.json"
+    $runtimeState = Join-Path (Get-BranchlineRuntimePath -ProjectRoot $projectRoot -LocalAppDataPath (Join-Path $testRoot "state")) "active.json"
     if (-not (Test-Path -LiteralPath $runtimeState -PathType Leaf)) { throw "The running server did not create active runtime state." }
     Remove-Item -LiteralPath $runtimeState -Force
     $runtimeDeadline = (Get-Date).AddSeconds(7)
@@ -192,4 +198,6 @@ finally {
             Remove-Item -LiteralPath $resolved -Recurse -Force
         }
     }
+    $env:LOCALAPPDATA = $originalLocalAppData
+    $env:BRANCHLINE_SKIP_LEGACY_RUNTIME_MIGRATION = $originalSkipLegacyMigration
 }

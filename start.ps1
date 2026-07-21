@@ -12,7 +12,7 @@ $projectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $modulePath = Join-Path $projectRoot "src\GitControlPanel.psm1"
 $webRoot = Join-Path $projectRoot "web"
 $manifestPath = Join-Path $projectRoot "app.manifest.json"
-$runtimePath = Join-Path $projectRoot ".runtime"
+$runtimeHelperPath = Join-Path $projectRoot "src\private\RuntimeState.ps1"
 
 if (-not (Test-Path -LiteralPath $modulePath -PathType Leaf)) {
     throw "Application module was not found: $modulePath"
@@ -23,12 +23,16 @@ if (-not (Test-Path -LiteralPath $webRoot -PathType Container)) {
 if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
     throw "Application manifest was not found: $manifestPath"
 }
+if (-not (Test-Path -LiteralPath $runtimeHelperPath -PathType Leaf)) {
+    throw "Runtime-state helper was not found: $runtimeHelperPath"
+}
+. $runtimeHelperPath
+$runtimePath = Initialize-BranchlineRuntimePath -ProjectRoot $projectRoot
 
 $manifest = Get-Content -Raw -LiteralPath $manifestPath -Encoding UTF8 | ConvertFrom-Json
 if ([string]$manifest.appId -cne "branchline" -or [string]::IsNullOrWhiteSpace([string]$manifest.version)) {
     throw "Application manifest is invalid. Reinstall Branchline from a trusted source."
 }
-[System.IO.Directory]::CreateDirectory($runtimePath) | Out-Null
 $installIdPath = Join-Path $runtimePath "install-id"
 $installId = if (Test-Path -LiteralPath $installIdPath -PathType Leaf) { ([System.IO.File]::ReadAllText($installIdPath)).Trim() } else { "" }
 if ($installId -notmatch '^[a-f0-9]{32}$') {

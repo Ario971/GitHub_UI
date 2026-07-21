@@ -59,6 +59,7 @@ Node.js, npm, and Playwright are only for developers running the test suite. Nor
 6. Double-click `RUN-BRANCHLINE.cmd`.
 
 Do not run the application from inside the ZIP preview. Extract it first.
+Branchline may be placed in any folder you choose. Its writable process marker and installation identity are kept under your Windows `%LOCALAPPDATA%` profile, not inside the application folder.
 
 ### Option B: Clone with Git
 

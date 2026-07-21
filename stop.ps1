@@ -6,7 +6,10 @@ param(
 
 $ErrorActionPreference = "Stop"
 $projectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
-$runtimePath = Join-Path $projectRoot ".runtime"
+$runtimeHelperPath = Join-Path $projectRoot "src\private\RuntimeState.ps1"
+if (-not (Test-Path -LiteralPath $runtimeHelperPath -PathType Leaf)) { throw "Branchline runtime-state helper is missing." }
+. $runtimeHelperPath
+$runtimePath = Initialize-BranchlineRuntimePath -ProjectRoot $projectRoot
 $installIdPath = Join-Path $runtimePath "install-id"
 if (-not (Test-Path -LiteralPath $installIdPath -PathType Leaf)) {
     Write-Host "This Branchline installation has no active runtime identity." -ForegroundColor Yellow

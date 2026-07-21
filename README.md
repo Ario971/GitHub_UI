@@ -1,4 +1,4 @@
-# Branchline Git Workbench 0.9.0-beta
+# Branchline Git Workbench 0.9.1-beta
 
 Branchline is a local Windows control panel for everyday Git and GitHub work. It keeps the real PowerShell, HTML, CSS, and JavaScript source visible in the repository and turns common Git operations into a careful, readable workflow.
 
@@ -150,7 +150,7 @@ The last selected repository path is stored at:
 %LOCALAPPDATA%\GitControlPanel\config.json
 ```
 
-Installation identity and the currently active port are stored in the ignored local `.runtime` folder. `/api/about` exposes only the application ID, version, protocol version, and installation ID; it never returns repository paths or session tokens.
+Installation identity and the currently active port are stored under `%LOCALAPPDATA%\Branchline\runtime`. This keeps the application folder read-only, so Branchline can run from any location the user can read, including `C:\Projects` or a managed tools folder. Existing installation-local `.runtime` identity is migrated automatically. `/api/about` exposes only the application ID, version, protocol version, and installation ID; it never returns repository paths or session tokens.
 
 No credentials, tokens, diffs, commit messages, or command output are stored there. GitHub credentials remain managed by Git Credential Manager.
 
