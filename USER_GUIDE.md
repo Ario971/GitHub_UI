@@ -61,6 +61,16 @@ Node.js, npm, and Playwright are only for developers running the test suite. Nor
 Do not run the application from inside the ZIP preview. Extract it first.
 Branchline may be placed in any folder you choose. Its writable process marker and installation identity are kept under your Windows `%LOCALAPPDATA%` profile, not inside the application folder.
 
+Normally, double-clicking `RUN-BRANCHLINE.cmd` is enough. If Windows still blocks the extracted files, open **Windows PowerShell**—not Command Prompt (`cmd`)—and run the following commands. Replace `C:\Projects\GitHub` if you chose a different installation folder.
+
+```powershell
+Get-ChildItem -LiteralPath "C:\Projects\GitHub" -Recurse | Unblock-File
+Set-Location "C:\Projects\GitHub"
+.\RUN-BRANCHLINE.cmd
+```
+
+These PowerShell commands are an optional troubleshooting method, not a required installation step.
+
 ### Option B: Clone with Git
 
 Open PowerShell in the folder where Branchline should live and run:

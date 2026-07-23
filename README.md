@@ -48,12 +48,29 @@ This version replaces the encoded single-file application with plain source and 
 - Git Credential Manager for the optional GitHub sign-in buttons;
 - a current browser.
 
-## Start
+## How to run on Windows
 
-Double-click the clearly named launcher:
+For normal use, no terminal command is required:
+
+1. Download the repository ZIP.
+2. Right-click the ZIP, choose **Properties**, enable **Unblock** if it is shown, and click **Apply**.
+3. Extract the ZIP to any folder you choose.
+4. Open the extracted folder and double-click:
 
 ```text
 RUN-BRANCHLINE.cmd
+```
+
+Do not run Branchline inside the ZIP preview. The application folder may stay at a custom location such as `C:\Projects\GitHub`; writable runtime files are stored under your Windows `%LOCALAPPDATA%` profile.
+
+### Optional PowerShell troubleshooting
+
+Use the following only when Windows still blocks the extracted files or when you want to start Branchline manually. Open **Windows PowerShell**, not Command Prompt (`cmd`), replace the path if necessary, and run:
+
+```powershell
+Get-ChildItem -LiteralPath "C:\Projects\GitHub" -Recurse | Unblock-File
+Set-Location "C:\Projects\GitHub"
+.\RUN-BRANCHLINE.cmd
 ```
 
 The application opens automatically at:
@@ -66,7 +83,7 @@ Stop it with `Ctrl+C` in the Branchline PowerShell window. You can also
 double-click `STOP-BRANCHLINE.cmd`; it verifies that port 4848 belongs to
 Branchline before stopping anything.
 
-You can also start it explicitly:
+Advanced users can pass a repository path directly:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy RemoteSigned -File .\start.ps1 -RepoPath "C:\Projects\my-repo"
